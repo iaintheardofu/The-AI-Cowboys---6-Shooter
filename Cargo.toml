@@ -1,0 +1,85 @@
+[package]
+name = "yield-daemon"
+version = "0.1.0"
+edition = "2021"
+description = "High-Performance Algorithmic Infrastructure for Autonomous Yield Generation"
+authors = ["AI Cowboys <ops@aicowboys.com>"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Crypto / finite field arithmetic
+ark-ff = "0.4"
+ark-ec = "0.4"
+ark-bn254 = "0.4"
+ark-std = "0.4"
+num-bigint = "0.4"
+num-traits = "0.2"
+num-integer = "0.1"
+sha2 = "0.10"
+blake3 = "0.3"
+
+# Networking
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+
+# Data structures
+dashmap = "5"
+crossbeam = "0.8"
+parking_lot = "0.12"
+
+# SIMD
+packed_simd_2 = { version = "0.3", optional = true }
+
+# Logging / metrics
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+prometheus = "0.13"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Config
+toml = "0.8"
+
+# Error handling
+anyhow = "1"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.8"
+
+[features]
+default = []
+avx512 = []
+simd = ["packed_simd_2"]
+cuda = []
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+target-cpu = "native"
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+
+[[bench]]
+name = "ntt_bench"
+harness = false
+
+[[bin]]
+name = "yield-daemon"
+path = "src/main.rs"
