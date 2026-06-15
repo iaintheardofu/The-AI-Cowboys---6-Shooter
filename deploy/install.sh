@@ -16,11 +16,23 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-echo "==> Installing yield-daemon to ${PREFIX}"
+# Resolve artifacts whether run from the extracted tarball (all files next to
+# this script) or directly from the source tree (deploy/ + ../target + ../config.toml).
+BIN_SRC=""
+for c in "${HERE}/yield-daemon" \
+         "${HERE}/../target/x86_64-unknown-linux-musl/release/yield-daemon" \
+         "${HERE}/../target/release/yield-daemon"; do
+  [[ -x "$c" ]] && { BIN_SRC="$c"; break; }
+done
+[[ -n "${BIN_SRC}" ]] || { echo "error: yield-daemon binary not found — run deploy/package.sh first" >&2; exit 1; }
+CFG_SRC="${HERE}/config.toml"; [[ -f "${CFG_SRC}" ]] || CFG_SRC="${HERE}/../config.toml"
+UNIT_SRC="${HERE}/yield-daemon.service"
+
+echo "==> Installing yield-daemon to ${PREFIX}  (binary: ${BIN_SRC})"
 install -d -m 0755 "${PREFIX}" "${PREFIX}/runtime"
-install -m 0755 "${HERE}/yield-daemon"        "${PREFIX}/yield-daemon"
-install -m 0644 "${HERE}/config.toml"         "${PREFIX}/config.toml"
-install -m 0644 "${HERE}/yield-daemon.service" "${UNIT}"
+install -m 0755 "${BIN_SRC}"  "${PREFIX}/yield-daemon"
+install -m 0644 "${CFG_SRC}"  "${PREFIX}/config.toml"
+install -m 0644 "${UNIT_SRC}" "${UNIT}"
 
 echo "==> Reloading systemd"
 systemctl daemon-reload
