@@ -144,6 +144,18 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // ── Prometheus metrics endpoint ──────────────────────────────────────
+    // Serve DaemonMetrics in Prometheus text format on --metrics-port so
+    // external scrapers (Prometheus/Grafana) can read live counters. The
+    // Python orchestrator uses the JSON file bridge above, not this endpoint.
+    let prom_state = state.clone();
+    let prom_port = cli.metrics_port;
+    tokio::spawn(async move {
+        if let Err(e) = serve_prometheus(prom_state, prom_port).await {
+            warn!("[Metrics] Prometheus endpoint stopped: {}", e);
+        }
+    });
+
     info!("All modules spawned. Daemon running.");
 
     for h in handles {
@@ -152,6 +164,67 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Yield Daemon shutdown complete");
     Ok(())
+}
+
+/// Serve DaemonMetrics in Prometheus text exposition format on `port`.
+/// Minimal HTTP/1.1 over a tokio TcpListener — no extra framework. Answers
+/// GET /metrics (and GET /) with the metrics; anything else returns 404.
+async fn serve_prometheus(state: Arc<DaemonState>, port: u16) -> anyhow::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let addr = format!("0.0.0.0:{port}");
+    let listener = TcpListener::bind(&addr).await?;
+    info!("[Metrics] Prometheus endpoint on http://{}/metrics", addr);
+
+    loop {
+        let (mut sock, _) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(_) => continue,
+        };
+        let st = state.clone();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let n = sock.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let is_metrics = req.starts_with("GET /metrics") || req.starts_with("GET / ");
+            let (status, ctype, body) = if is_metrics {
+                ("200 OK", "text/plain; version=0.0.4", render_prometheus(&st.metrics))
+            } else {
+                ("404 Not Found", "text/plain", "not found\n".to_string())
+            };
+            let resp = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.shutdown().await;
+        });
+    }
+}
+
+/// Render DaemonMetrics as Prometheus text exposition format (v0.0.4).
+fn render_prometheus(m: &DaemonMetrics) -> String {
+    use std::fmt::Write;
+    use std::sync::atomic::Ordering::Relaxed;
+    let mut out = String::with_capacity(2048);
+    macro_rules! emit {
+        ($name:literal, $help:literal, $typ:literal, $val:expr) => {{
+            let _ = write!(out, "# HELP {} {}\n# TYPE {} {}\n{} {}\n", $name, $help, $name, $typ, $name, $val);
+        }};
+    }
+    emit!("yield_daemon_zk_proofs_generated", "ZK proofs generated", "counter", m.zk_proofs_generated.load(Relaxed));
+    emit!("yield_daemon_zk_proofs_accepted", "ZK proofs accepted", "counter", m.zk_proofs_accepted.load(Relaxed));
+    emit!("yield_daemon_zk_revenue_sat", "ZK revenue in satoshis", "counter", m.zk_revenue_sat.load(Relaxed));
+    emit!("yield_daemon_mev_opportunities_detected", "MEV opportunities detected", "counter", m.mev_opportunities_detected.load(Relaxed));
+    emit!("yield_daemon_mev_bundles_submitted", "MEV bundles submitted", "counter", m.mev_bundles_submitted.load(Relaxed));
+    emit!("yield_daemon_mev_revenue_sat", "MEV revenue in satoshis", "counter", m.mev_revenue_sat.load(Relaxed));
+    emit!("yield_daemon_ml_inferences_served", "ML inferences served", "counter", m.ml_inferences_served.load(Relaxed));
+    emit!("yield_daemon_ml_training_rounds", "ML background training rounds", "counter", m.ml_training_rounds.load(Relaxed));
+    emit!("yield_daemon_ml_revenue_sat", "ML revenue in satoshis", "counter", m.ml_revenue_sat.load(Relaxed));
+    emit!("yield_daemon_total_cycles", "Total daemon cycles", "counter", m.total_cycles.load(Relaxed));
+    emit!("yield_daemon_uptime_seconds", "Daemon uptime in seconds", "gauge", m.uptime_secs.load(Relaxed));
+    out
 }
 
 /// Atomically write a metrics JSON file (write-tmp + rename) for the Python
