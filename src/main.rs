@@ -104,6 +104,46 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // ── Metrics bridge ───────────────────────────────────────────────────
+    // Export atomic counters to per-domain JSON files that the Python
+    // orchestrator (runtime/yield_daemon.py::_collect_daemon_metrics) polls.
+    // Without this the Python side has no telemetry channel and reads zeros.
+    let metrics_state = state.clone();
+    tokio::spawn(async move {
+        use std::sync::atomic::Ordering::Relaxed;
+        let state_dir = PathBuf::from(&metrics_state.config.general.state_dir);
+        if let Err(e) = std::fs::create_dir_all(&state_dir) {
+            warn!("[Metrics] cannot create state_dir {:?}: {}", state_dir, e);
+        }
+        let interval = metrics_state.config.general.metrics_interval_secs.max(1);
+        info!("[Metrics] exporting to {:?} every {}s", state_dir, interval);
+        loop {
+            let m = &metrics_state.metrics;
+            write_metrics_file(&state_dir.join("zk_metrics.json"), &serde_json::json!({
+                "proofs_generated": m.zk_proofs_generated.load(Relaxed),
+                "proofs_accepted": m.zk_proofs_accepted.load(Relaxed),
+                "revenue_sat": m.zk_revenue_sat.load(Relaxed),
+            }));
+            write_metrics_file(&state_dir.join("mev_metrics.json"), &serde_json::json!({
+                "opportunities": m.mev_opportunities_detected.load(Relaxed),
+                "bundles_submitted": m.mev_bundles_submitted.load(Relaxed),
+                "revenue_sat": m.mev_revenue_sat.load(Relaxed),
+            }));
+            write_metrics_file(&state_dir.join("ml_metrics.json"), &serde_json::json!({
+                "inferences": m.ml_inferences_served.load(Relaxed),
+                "training_rounds": m.ml_training_rounds.load(Relaxed),
+                "revenue_sat": m.ml_revenue_sat.load(Relaxed),
+            }));
+            // Sleep in 1s steps so shutdown stays responsive.
+            for _ in 0..interval {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if !metrics_state.running.load(Relaxed) {
+                    return;
+                }
+            }
+        }
+    });
+
     info!("All modules spawned. Daemon running.");
 
     for h in handles {
@@ -112,4 +152,22 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Yield Daemon shutdown complete");
     Ok(())
+}
+
+/// Atomically write a metrics JSON file (write-tmp + rename) for the Python
+/// orchestrator's poller. Best-effort: a failed write is skipped, not fatal.
+fn write_metrics_file(path: &std::path::Path, value: &serde_json::Value) {
+    let body = match serde_json::to_string_pretty(value) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let tmp = path.with_file_name(format!(
+        "{}.tmp",
+        path.file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    ));
+    if std::fs::write(&tmp, body).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
 }
