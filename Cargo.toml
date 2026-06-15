@@ -70,7 +70,10 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
-target-cpu = "native"
+# NOTE: target-cpu is intentionally NOT pinned to "native" — that bakes in the
+# build host's exact ISA and makes the binary non-portable (SIGILL on other
+# CPUs), which defeats a standalone/deployable artifact. For single-host max
+# performance build with: RUSTFLAGS="-C target-cpu=native" cargo build --release
 
 [profile.bench]
 opt-level = 3

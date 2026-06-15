@@ -1,0 +1,33 @@
+[Unit]
+Description=Yield Daemon — Autonomous Yield Generation Infrastructure
+Documentation=https://github.com/iaintheardofu/workforce
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/yield-daemon
+# --dry-run is kept on purpose: remove it ONLY after configuring live
+# endpoints/wallets in config.toml and understanding the risk model.
+ExecStart=/opt/yield-daemon/yield-daemon --config /opt/yield-daemon/config.toml --dry-run
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+# --- Sandboxing / hardening ---
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+# The daemon writes metrics state under <WorkingDirectory>/runtime/yield_daemon
+ReadWritePaths=/opt/yield-daemon/runtime
+# Resource guard rails
+MemoryMax=2G
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

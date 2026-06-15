@@ -3,3 +3,6 @@
 *.so
 *.dylib
 .DS_Store
+
+# Release artifacts
+deploy/dist/
