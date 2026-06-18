@@ -7,11 +7,14 @@ pub mod state_shadow;
 pub mod graph;
 pub mod simd_solver;
 pub mod aste;
+pub mod executor;
 
 use crate::DaemonState;
 use crate::memory::arena::Arena;
+use crate::net::solana::Keypair;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::path::Path;
 use tracing::{info, warn, error, debug};
 use tokio::sync::mpsc;
 
@@ -48,8 +51,32 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
         config.max_latency_us,
     );
 
-    // Build bundle constructor
-    let bundler = bundle::BundleConstructor::new(state.config.general.dry_run);
+    // Build bundle constructor — attach LiveExecutor for real submission
+    let bundler = if !state.config.general.dry_run {
+        // Try to load keypair and configure live executor
+        let keypair_path = state.config.treasury.wallet_keypair_path.as_deref()
+            .unwrap_or("keypair.json");
+        match Keypair::load(Path::new(keypair_path)) {
+            Ok(kp) => {
+                let block_engine = state.config.mev.jito_block_engine.as_deref()
+                    .unwrap_or("https://mainnet.block-engine.jito.wtf");
+                let rpc_url = state.config.mev.rpc_endpoints.first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("https://api.mainnet-beta.solana.com");
+                let live_exec = Arc::new(executor::LiveExecutor::new(
+                    kp, block_engine, rpc_url, false,
+                ));
+                info!("[MEV] LiveExecutor initialized — REAL MONEY MODE");
+                bundle::BundleConstructor::new(false).with_executor(live_exec)
+            }
+            Err(e) => {
+                warn!("[MEV] No keypair at '{}': {} — falling back to dry-run", keypair_path, e);
+                bundle::BundleConstructor::new(true)
+            }
+        }
+    } else {
+        bundle::BundleConstructor::new(true)
+    };
 
     // ── ASTE Integration ────────────────────────────────────────────
     // The ASTE runs alongside the legacy pipeline. Events are forked:

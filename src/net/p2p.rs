@@ -2,11 +2,13 @@
 //!
 //! Subscribes to pending transactions from validator nodes, filters by
 //! target AMM programs, and feeds the MEV hot path with pre-parsed data.
+//! Live mode uses tokio-tungstenite for real WebSocket connections.
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error, debug};
+use futures_util::{StreamExt, SinkExt};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MempoolTransaction {
@@ -50,14 +52,21 @@ impl MempoolSubscriber {
             let programs = self.target_programs.clone();
             let sender = self.tx_sender.clone();
 
+            // Build a bloom filter for O(1) program matching
+            let mut filter = ProgramFilter::new(programs.len().max(10), 0.001);
+            for p in &programs {
+                filter.insert(p.as_bytes());
+            }
+
             tokio::spawn(async move {
                 loop {
-                    match Self::connect_and_subscribe(&ep, &programs, &sender).await {
-                        Ok(()) => info!("[P2P] WebSocket connection closed normally"),
+                    match Self::connect_and_subscribe(&ep, &programs, &filter, &sender).await {
+                        Ok(()) => info!("[P2P] WebSocket connection closed normally on {}", ep),
                         Err(e) => warn!("[P2P] WebSocket error on {}: {}", ep, e),
                     }
-                    // Reconnect after 1 second
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    // Reconnect with backoff
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    info!("[P2P] Reconnecting to {}", ep);
                 }
             });
         }
@@ -67,35 +76,108 @@ impl MempoolSubscriber {
 
     async fn connect_and_subscribe(
         endpoint: &str,
-        _programs: &[String],
-        _sender: &mpsc::Sender<MempoolTransaction>,
+        programs: &[String],
+        filter: &ProgramFilter,
+        sender: &mpsc::Sender<MempoolTransaction>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("[P2P] Connecting to {}", endpoint);
 
-        // WebSocket connection and subscription logic
-        // In production, this connects to Jito or validator geyser plugins
-        // For now, structured as a polling fallback
+        let (ws_stream, _response) = tokio_tungstenite::connect_async(endpoint).await?;
+        let (mut write, mut read) = ws_stream.split();
 
+        info!("[P2P] Connected to {}", endpoint);
+
+        // Subscribe to log notifications mentioning our target programs
         let subscribe_msg = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "logsSubscribe",
             "params": [
-                {"mentions": _programs},
+                {"mentions": programs},
                 {"commitment": "processed"}
             ]
         });
 
-        debug!("[P2P] Subscription message: {}", subscribe_msg);
+        write.send(tungstenite::Message::Text(subscribe_msg.to_string())).await?;
+        debug!("[P2P] Subscribed to logs on {}", endpoint);
 
-        // Placeholder: actual WS connection via tungstenite
-        // The real implementation would:
-        // 1. Connect via tokio_tungstenite
-        // 2. Send subscribe_msg
-        // 3. Parse incoming log notifications
-        // 4. Filter by target_programs (branchless bloom filter check)
-        // 5. Parse transaction data with SIMD JSON parser
-        // 6. Send to tx_sender channel
+        // Process incoming messages
+        while let Some(msg) = read.next().await {
+            match msg {
+                Ok(tungstenite::Message::Text(text)) => {
+                    let now_ns = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos() as u64;
+
+                    // Parse the RPC notification
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        // Extract log notification data
+                        if let Some(params) = json.get("params") {
+                            if let Some(result) = params.get("result") {
+                                if let Some(value) = result.get("value") {
+                                    let signature = value.get("signature")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+
+                                    // Extract logs and check for AMM program mentions
+                                    let logs: Vec<String> = value.get("logs")
+                                        .and_then(|v| v.as_array())
+                                        .map(|arr| arr.iter()
+                                            .filter_map(|v| v.as_str().map(String::from))
+                                            .collect())
+                                        .unwrap_or_default();
+
+                                    // Extract program IDs from invoke logs
+                                    let mut program_ids = Vec::new();
+                                    for log in &logs {
+                                        if log.starts_with("Program ") && log.contains(" invoke") {
+                                            if let Some(pid) = log.strip_prefix("Program ") {
+                                                if let Some(pid) = pid.split_whitespace().next() {
+                                                    if filter.contains(pid.as_bytes()) {
+                                                        program_ids.push(pid.to_string());
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if !program_ids.is_empty() && !signature.is_empty() {
+                                        let tx = MempoolTransaction {
+                                            signature,
+                                            program_ids,
+                                            accounts: Vec::new(), // Populated by getTransaction if needed
+                                            data: Vec::new(),
+                                            slot: value.get("slot")
+                                                .and_then(|v| v.as_u64())
+                                                .unwrap_or(0),
+                                            received_at_ns: now_ns,
+                                        };
+
+                                        if sender.try_send(tx).is_err() {
+                                            debug!("[P2P] Channel full, dropping transaction");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(tungstenite::Message::Ping(data)) => {
+                    let _ = write.send(tungstenite::Message::Pong(data)).await;
+                }
+                Ok(tungstenite::Message::Close(_)) => {
+                    info!("[P2P] Server closed connection on {}", endpoint);
+                    break;
+                }
+                Err(e) => {
+                    error!("[P2P] WebSocket read error: {}", e);
+                    break;
+                }
+                _ => {}
+            }
+        }
 
         Ok(())
     }

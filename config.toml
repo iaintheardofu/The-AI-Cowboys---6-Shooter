@@ -2,7 +2,7 @@
 # All values have safe defaults. Uncomment and configure for live operation.
 
 [general]
-dry_run = true
+dry_run = false
 state_dir = "runtime/yield_daemon"
 log_level = "info"
 metrics_interval_secs = 30
@@ -60,7 +60,7 @@ max_stake_fraction = 0.10
 # Autonomous profit extraction: crypto profits -> stablecoin -> bank account
 [treasury]
 enabled = true
-dry_run = true   # Start in dry-run! Set false only after configuring credentials
+dry_run = false   # LIVE MODE — real transactions, real money
 
 # Consolidation: swap volatile tokens to stablecoins when profit exceeds threshold
 consolidation_threshold = 50000000   # 0.05 SOL in lamports
