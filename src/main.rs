@@ -224,6 +224,10 @@ fn render_prometheus(m: &DaemonMetrics) -> String {
     emit!("yield_daemon_ml_revenue_sat", "ML revenue in satoshis", "counter", m.ml_revenue_sat.load(Relaxed));
     emit!("yield_daemon_total_cycles", "Total daemon cycles", "counter", m.total_cycles.load(Relaxed));
     emit!("yield_daemon_uptime_seconds", "Daemon uptime in seconds", "gauge", m.uptime_secs.load(Relaxed));
+    emit!("yield_daemon_aste_cycles", "ASTE searcher cycles", "counter", m.aste_cycles.load(Relaxed));
+    emit!("yield_daemon_aste_arb_detected", "ASTE arbitrage cycles detected", "counter", m.aste_arb_detected.load(Relaxed));
+    emit!("yield_daemon_aste_arb_profitable", "ASTE profitable arbitrages", "counter", m.aste_arb_profitable.load(Relaxed));
+    emit!("yield_daemon_aste_latency_ns", "ASTE avg cycle latency nanoseconds", "gauge", m.aste_latency_ns.load(Relaxed));
     out
 }
 

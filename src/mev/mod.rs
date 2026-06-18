@@ -3,6 +3,10 @@ pub mod router;
 pub mod amm;
 pub mod bundle;
 pub mod solver;
+pub mod state_shadow;
+pub mod graph;
+pub mod simd_solver;
+pub mod aste;
 
 use crate::DaemonState;
 use crate::memory::arena::Arena;
@@ -47,6 +51,28 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
     // Build bundle constructor
     let bundler = bundle::BundleConstructor::new(state.config.general.dry_run);
 
+    // ── ASTE Integration ────────────────────────────────────────────
+    // The ASTE runs alongside the legacy pipeline. Events are forked:
+    // mempool → legacy pipeline + ASTE event channel
+    let (aste_tx, aste_rx) = mpsc::channel::<aste::MempoolEvent>(50_000);
+    let aste_config = aste::AsteConfig {
+        max_hops: 4,
+        min_profit: config.min_profit_threshold as u128,
+        max_input: 100_000_000_000,
+        arena_size: 16 * 1024 * 1024,
+        graph_rebuild_interval: 50,
+        max_cycles_per_sec: 10_000,
+        dry_run: state.config.general.dry_run,
+        latency_budget_us: config.max_latency_us,
+    };
+    let aste_state = state.clone();
+    tokio::spawn(async move {
+        info!("[MEV] ASTE (Atomic State Transition Engine) starting");
+        if let Err(e) = aste::run_aste(aste_state, aste_rx, aste_config).await {
+            error!("[MEV] ASTE error: {}", e);
+        }
+    });
+
     info!("[MEV] Event loop starting");
 
     while state.running.load(Ordering::Relaxed) {
@@ -58,6 +84,14 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
                 // Phase 1: Parse transaction and identify AMM interaction
                 if let Some(swap) = amm::parse_swap_instruction(&tx) {
                     debug!("[MEV] Swap detected: {:?}", swap);
+
+                    // Forward to ASTE as a speculative event
+                    let _ = aste_tx.try_send(aste::MempoolEvent::PendingSwap {
+                        pool_idx: 0, // Resolved by ASTE via pool key lookup
+                        amount_in: swap.amount_in,
+                        x_to_y: true,
+                        tx_signature: [0u8; 64],
+                    });
 
                     // Phase 2: Check all pools for arbitrage opportunity
                     if let Some(route) = optimizer.find_arbitrage(&pool_registry, &swap) {

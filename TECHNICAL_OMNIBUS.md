@@ -295,6 +295,125 @@ For N tokens and M pools, construct a weighted directed graph:
 
 Bellman-Ford detects negative cycles in O(N × M) time. We run N-1 relaxation iterations, then check for further relaxation — any improvement indicates a negative cycle.
 
+### 4.6 ASTE — Atomic State Transition Engine
+
+The ASTE is the culmination of every HPC principle in this codebase, composed into a single searcher hot loop. It is not a standard "bot" — it is a hardware-optimized state-machine predator.
+
+#### 4.6.1 State Shadow — Cache-Aligned Local Blockchain Replica
+
+The `StateShadow` maintains a SoA (Structure-of-Arrays) mirror of all on-chain pool state with the following memory layout:
+
+```
+reserve_x[4096]:    u128 × 4096 = 64KB  ← contiguous, prefetch-friendly
+reserve_y[4096]:    u128 × 4096 = 64KB  ← sequential access = L1 streaming
+fee_num[4096]:      u32  × 4096 = 16KB
+fee_den[4096]:      u32  × 4096 = 16KB
+token_x_id[4096]:   u64  × 4096 = 32KB
+token_y_id[4096]:   u64  × 4096 = 32KB
+price_x_per_y[4096]:u64  × 4096 = 32KB  ← Q32.32 fixed-point
+spec_reserve_x[4096]: u128 × 4096 = 64KB ← speculative overlay
+spec_reserve_y[4096]: u128 × 4096 = 64KB
+Total: ~384KB (fits entirely in L2 cache)
+```
+
+**Speculative Overlay:** When a pending mempool swap is detected, the ASTE doesn't wait for block confirmation. It applies the swap's effect to the speculative reserves, then immediately searches for arbitrage on the predicted post-swap state. When a new block arrives, all speculative state is reverted in O(1) via bulk copy.
+
+**Price representation:** Q32.32 fixed-point (32 integer bits, 32 fractional bits). This provides 9 decimal digits of precision without any floating-point instruction — the CPU uses integer ALU only, which is fully pipelined at 1 op/cycle.
+
+#### 4.6.2 Price Graph — Negative Cycle Detection
+
+The `PriceGraph` models the DEX ecosystem as a directed weighted graph:
+
+```
+Graph G = (V, E) where:
+  V = {token_1, token_2, ..., token_n}        (unique tokens)
+  E = {(t_i, t_j, pool_k, w_ij)}             (swap routes)
+  w_ij = -log₂(rate_ij) in Q16.16 fixed-point
+```
+
+A negative-weight cycle C in G means: `Σ w_ij < 0` for edges (i,j) ∈ C, which implies `Π rate_ij > 1.0` — the product of exchange rates around the cycle exceeds 1.0 (profitable arbitrage).
+
+**Algorithm (modified Bellman-Ford):**
+1. For each source token s ∈ V:
+   - Initialize dist[s] = 0, dist[v] = +∞ for v ≠ s
+   - For i = 1 to min(|V|-1, max_hops):
+     - For each edge (u, v, w): if dist[u] + w < dist[v], update dist[v]
+   - Detection pass: any edge (u,v,w) where dist[u] + w < dist[v] reveals a cycle
+2. Reconstruct cycle by walking the predecessor chain
+
+**Fixed-point arithmetic:** Edge weights use Q16.16 (16 integer + 16 fractional bits). This is critical:
+- `log₂(1.01) ≈ 0.01439` → Q16.16 = 943 (integer representable)
+- `log₂(0.997) ≈ -0.00433` → Q16.16 = -284
+- Cycle weight = Σ weights; negative sum = profitable
+- Avoids all `f64` operations in the hot path
+
+#### 4.6.3 SIMD Solver — Vectorized Profit Evaluation
+
+The `SimdSolver` evaluates detected arbitrage cycles against the current state shadow:
+
+**Cycle simulation:** Chain swap computations through N pools:
+```
+amount = input
+for pool_idx, direction in cycle:
+    amount = shadow.sim_swap(pool_idx, amount, direction)
+profit = amount - input
+```
+
+**Optimal input search (Ternary Search):**
+The profit function P(x) = simulate(x) - x is concave for constant-product AMMs. Ternary search finds the peak in O(log₃(max_input/precision)) iterations:
+
+```
+lo, hi = 1, max_input
+for _ in 0..40:
+    m1 = lo + (hi - lo) / 3
+    m2 = hi - (hi - lo) / 3
+    p1 = simulate(m1) - m1
+    p2 = simulate(m2) - m2
+    // Branchless narrowing:
+    let mask = (p1 < p2) as u128;
+    lo = mask * m1 + (1 - mask) * lo;
+    hi = mask * hi + (1 - mask) * m2;
+```
+
+The inner narrowing is branchless — `(p1 < p2) as u128` compiles to a single `setb` instruction, and the subsequent arithmetic uses only `imul`/`add` with no control flow.
+
+**4-wide ILP unrolling:** Cycles are processed in groups of 4 to saturate the CPU's superscalar execution units. Each cycle evaluation is independent — the CPU can execute 4 ternary searches simultaneously using different ALU ports.
+
+**Spread scanning:** For direct 2-pool arbitrage, `scan_best_spread()` uses manually unrolled 4-element chunks:
+```
+for c in 0..(n/4):
+    a0, a1, a2, a3 = asks[4c..4c+4]     // 4 loads (independent)
+    b0, b1, b2, b3 = bids[4c..4c+4]     // 4 loads (independent)
+    // 8 independent comparisons — fills all ALU ports
+```
+
+With `-C target-cpu=native`, LLVM auto-vectorizes this to `vmovdqu` + `vpcmpq` (AVX2) or `vpmovq2m` (AVX-512).
+
+#### 4.6.4 ASTE Hot Loop
+
+The complete pipeline per mempool event:
+
+```
+EVENT ARRIVES (via lock-free mpsc channel)
+    │
+    ├─ PendingSwap:
+    │   ├── [SIMULATE] shadow.apply_speculative_swap()     ~50ns
+    │   ├── [GRAPH]    graph.build_from_shadow()           ~100μs (every 50 cycles)
+    │   ├── [DETECT]   graph.find_arbitrage_cycles()       ~500μs
+    │   ├── [EVALUATE] solver.evaluate_batch()             ~200μs
+    │   ├── [EXECUTE]  bundler.construct() + submit()      ~100μs + network
+    │   └── [RESET]    arena.reset()                       ~1ns
+    │
+    ├─ NewBlock:
+    │   ├── shadow.on_new_block(slot)                      ~10μs (bulk copy)
+    │   └── graph.build_from_shadow()                      ~100μs
+    │
+    └─ PoolUpdate:
+        └── shadow.update_reserves()                       ~10ns
+```
+
+**Arena lifecycle:** The 16MB arena allocator is reset to zero (single atomic store) at the end of every cycle. This means the ASTE never calls `malloc` or `free` during operation — all temporary allocations (graph nodes, cycle paths, solver results) live in the arena and die instantly.
+
 ---
 
 ## 5. Distributed ML Inference

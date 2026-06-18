@@ -27,6 +27,11 @@ pub struct DaemonMetrics {
     pub ml_revenue_sat: std::sync::atomic::AtomicU64,
     pub total_cycles: std::sync::atomic::AtomicU64,
     pub uptime_secs: std::sync::atomic::AtomicU64,
+    // ASTE (Atomic State Transition Engine) metrics
+    pub aste_cycles: std::sync::atomic::AtomicU64,
+    pub aste_arb_detected: std::sync::atomic::AtomicU64,
+    pub aste_arb_profitable: std::sync::atomic::AtomicU64,
+    pub aste_latency_ns: std::sync::atomic::AtomicU64,
 }
 
 impl DaemonMetrics {
@@ -44,6 +49,10 @@ impl DaemonMetrics {
             ml_revenue_sat: AtomicU64::new(0),
             total_cycles: AtomicU64::new(0),
             uptime_secs: AtomicU64::new(0),
+            aste_cycles: AtomicU64::new(0),
+            aste_arb_detected: AtomicU64::new(0),
+            aste_arb_profitable: AtomicU64::new(0),
+            aste_latency_ns: AtomicU64::new(0),
         }
     }
 }

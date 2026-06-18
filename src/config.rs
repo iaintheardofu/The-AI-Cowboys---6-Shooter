@@ -94,6 +94,15 @@ pub struct MevConfig {
     /// Intent solver mode (CoW Protocol)
     #[serde(default)]
     pub intent_solver: bool,
+    /// ASTE: max hops in arbitrage cycle (2=direct, 3+=triangular+)
+    #[serde(default = "default_aste_max_hops")]
+    pub aste_max_hops: usize,
+    /// ASTE: graph rebuild interval (every N events)
+    #[serde(default = "default_aste_graph_interval")]
+    pub aste_graph_rebuild_interval: u64,
+    /// ASTE: maximum input amount to test in binary search
+    #[serde(default = "default_aste_max_input")]
+    pub aste_max_input: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -174,6 +183,10 @@ fn default_max_cycle_loss() -> f64 { 0.01 }
 fn default_circuit_breaker() -> u32 { 10 }
 fn default_max_stake() -> f64 { 0.10 }
 
+fn default_aste_max_hops() -> usize { 4 }
+fn default_aste_graph_interval() -> u64 { 50 }
+fn default_aste_max_input() -> u64 { 100_000_000_000 } // 100 SOL in lamports
+
 fn default_amm_programs() -> Vec<String> {
     vec![
         "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8".to_string(), // Raydium
@@ -222,6 +235,9 @@ impl Default for MevConfig {
             arena_size_bytes: default_arena_size(),
             kernel_bypass: false,
             intent_solver: false,
+            aste_max_hops: default_aste_max_hops(),
+            aste_graph_rebuild_interval: default_aste_graph_interval(),
+            aste_max_input: default_aste_max_input(),
         }
     }
 }
