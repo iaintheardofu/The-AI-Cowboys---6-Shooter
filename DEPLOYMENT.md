@@ -97,18 +97,22 @@ scrape_configs:
       - targets: ['HOST:9191']
 ```
 
-Exposed series (all `counter` except uptime `gauge`):
+Exposed series (18 total — all `counter` except uptime/balance `gauge`):
 
 ```
-yield_daemon_zk_proofs_generated      yield_daemon_mev_opportunities_detected
-yield_daemon_zk_proofs_accepted       yield_daemon_mev_bundles_submitted
-yield_daemon_zk_revenue_sat           yield_daemon_mev_revenue_sat
-yield_daemon_ml_inferences_served     yield_daemon_ml_training_rounds
-yield_daemon_ml_revenue_sat           yield_daemon_total_cycles
-yield_daemon_uptime_seconds
+yield_daemon_zk_proofs_generated          yield_daemon_mev_opportunities_detected
+yield_daemon_zk_proofs_accepted           yield_daemon_mev_bundles_submitted
+yield_daemon_zk_revenue_sat               yield_daemon_mev_revenue_sat
+yield_daemon_ml_inferences_served         yield_daemon_ml_training_rounds
+yield_daemon_ml_revenue_sat               yield_daemon_total_cycles
+yield_daemon_uptime_seconds               yield_daemon_aste_cycles
+yield_daemon_aste_arb_detected            yield_daemon_aste_arb_profitable
+yield_daemon_aste_latency_ns              yield_daemon_treasury_profit_accumulated
+yield_daemon_treasury_stablecoin_balance  yield_daemon_treasury_fiat_withdrawn_cents
+yield_daemon_treasury_offramp_cycles
 ```
 
-The daemon also writes `{zk,mev,ml}_metrics.json` to `state_dir` every
+The daemon also writes `{zk,mev,ml,treasury}_metrics.json` to `state_dir` every
 `metrics_interval_secs` — that JSON bridge is what the Python orchestrator polls
 (the Prometheus endpoint is for external scrapers).
 
@@ -116,16 +120,22 @@ The daemon also writes `{zk,mev,ml}_metrics.json` to `state_dir` every
 
 ## Configuration
 
-All settings live in `config.toml`; every value has a safe default and the
-daemon starts in dry-run. Key sections: `[general]` (dry_run, state_dir,
-metrics_interval_secs), `[zk]`, `[mev]`, `[ml]`, `[risk]`.
+All settings live in `config.toml`; every value has a safe default. Key sections:
+`[general]`, `[zk]`, `[mev]`, `[ml]`, `[treasury]`, `[risk]`.
 
 ### Going live
 
-1. Set `dry_run = false`.
-2. Uncomment and fill RPC endpoints + wallets (`succinct_rpc`, Solana
-   `rpc_endpoints`/`jito_block_engine`, `bittensor_endpoint`, etc.).
-3. Review `[risk]` (max capital at risk, circuit breaker threshold).
+1. Set `[general] dry_run = false` and `[treasury] dry_run = false`.
+2. Drop your Solana keypair as `keypair.json` (or set `wallet_keypair_path`).
+3. Uncomment and fill RPC endpoints + wallets (`rpc_endpoints`,
+   `ws_endpoints`, `jito_block_engine`, `bittensor_endpoint`, etc.).
+4. Configure exchange API credentials in `[treasury]` (api_key, api_secret,
+   bank_account_id) — or use `.env` file (see `.env.example`).
+5. Review `[risk]` (max capital at risk, circuit breaker threshold).
+
+**Live execution safety:** If no `keypair.json` is found at startup, the MEV
+module automatically falls back to dry-run mode. The treasury module also
+validates exchange credentials before attempting real off-ramp transactions.
 
 The Python orchestrator additionally gates live-mode activation behind a Human
 Gate. **Understand the risk model before disabling dry-run.**

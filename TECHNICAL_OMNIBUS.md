@@ -1,4 +1,4 @@
-# Technical Omnibus — Yield Daemon v0.1.0
+# Technical Omnibus — Yield Daemon v0.2.0
 
 ## Comprehensive Engineering Reference
 
@@ -14,10 +14,12 @@
 6. [Memory Architecture](#6-memory-architecture)
 7. [Compilation and Profiling](#7-compilation-and-profiling)
 8. [Network Protocol Engineering](#8-network-protocol-engineering)
-9. [Risk and Governance](#9-risk-and-governance)
-10. [Orchestrator Integration](#10-orchestrator-integration)
-11. [Benchmarking Methodology](#11-benchmarking-methodology)
-12. [Deployment Architecture](#12-deployment-architecture)
+9. [Live Execution Layer](#9-live-execution-layer)
+10. [Treasury and Off-Ramp Pipeline](#10-treasury-and-off-ramp-pipeline)
+11. [Risk and Governance](#11-risk-and-governance)
+12. [Orchestrator Integration](#12-orchestrator-integration)
+13. [Benchmarking Methodology](#13-benchmarking-methodology)
+14. [Deployment Architecture](#14-deployment-architecture)
 
 ---
 
@@ -637,9 +639,234 @@ Total savings: 2-5μs per packet — meaningful when total latency budget is 200
 
 ---
 
-## 9. Risk and Governance
+## 9. Live Execution Layer
 
-### 9.1 Circuit Breaker
+### 9.1 Ed25519 Transaction Signing
+
+The daemon signs Solana transactions using `ed25519-dalek` (v2), a production-grade Rust implementation of RFC 8032. Key design decisions:
+
+**No `solana-sdk` dependency.** The Solana SDK pulls in 200+ transitive dependencies and adds >50MB to compile time. We implement the wire format directly — 624 lines total for keypair loading, transaction serialization, signing, and Jito submission.
+
+**Keypair loading (`net/solana.rs`):**
+```
+Solana CLI format: JSON array of 64 u8 values
+  [0..32]  = ed25519 secret key (seed)
+  [32..64] = ed25519 public key (derived)
+
+Load → SigningKey::from_bytes(&secret)
+     → Verify derived pubkey matches stored pubkey
+     → Warn if mismatch (use derived)
+```
+
+**Transaction serialization — Solana wire format:**
+```
+[compact-u16: num_signatures]
+[64 bytes × num_signatures]
+[Message]:
+  [u8: num_required_signers]
+  [u8: num_readonly_signed]
+  [u8: num_readonly_unsigned]
+  [compact-u16: num_account_keys]
+  [32 bytes × num_account_keys]
+  [32 bytes: recent_blockhash]
+  [compact-u16: num_instructions]
+  [Instructions]:
+    [u8: program_id_index]
+    [compact-u16: num_account_indices]
+    [u8 × num_account_indices]
+    [compact-u16: data_length]
+    [u8 × data_length]
+```
+
+**Compact-u16 encoding** (Solana's variable-length integer format):
+- Values 0-127: 1 byte (high bit = 0)
+- Values 128-16383: 2 bytes (first byte high bit = 1)
+- Values 16384-65535: 3 bytes
+
+**Base58 encode/decode** (Bitcoin/Solana variant, custom implementation):
+- Leading zero bytes map to '1' characters
+- Division-based encoding with alphabet `123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz`
+- Decode via 128-byte lookup table (O(1) per character)
+
+### 9.2 Jito Block Engine Integration
+
+Jito provides MEV-protected transaction inclusion for Solana. Our `JitoClient` submits bundles via the REST API:
+
+**Bundle format:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "sendBundle",
+  "params": [["<base58_tx_1>", "<base58_tx_2>"]]
+}
+```
+
+**Tip account rotation:** Jito requires a tip transfer to one of 8 Program Derived Addresses (PDAs). We rotate based on `subsec_nanos % 8` for uniform distribution.
+
+**Tip floor query:** GET `/api/v1/bundles/tip_floor` returns percentile tip data. We use the 50th percentile as the floor and add profit-proportional tips above it.
+
+**Bundle lifecycle:**
+1. Get latest blockhash via `getLatestBlockhash`
+2. Build swap transaction (multi-hop, account-deduplicated)
+3. Build tip transaction (SOL transfer to random Jito PDA)
+4. Sign both with ed25519-dalek
+5. Submit as atomic bundle
+6. Poll `getBundleStatuses` for confirmation
+
+### 9.3 Live MEV Executor
+
+The `LiveExecutor` (`mev/executor.rs`) bridges ASTE arbitrage results to real blockchain transactions:
+
+**Raydium V4 swap instruction layout (18 accounts):**
+```
+[0]  Token Program (SPL)
+[1]  AMM ID
+[2]  AMM Authority (PDA)
+[3]  AMM Open Orders
+[4]  AMM Target Orders
+[5]  Pool Coin Token Account
+[6]  Pool PC Token Account
+[7]  Serum Program
+[8]  Serum Market
+[9]  Serum Bids
+[10] Serum Asks
+[11] Serum Event Queue
+[12] Serum Coin Vault
+[13] Serum PC Vault
+[14] Serum Vault Signer
+[15] User Source Token
+[16] User Destination Token
+[17] User Owner (signer)
+
+Data: [discriminator: 8 bytes = 0x09...] [amount_in: u64 LE] [min_out: u64 LE]
+```
+
+**Account deduplication:** Multi-hop bundles reuse accounts across instructions. The executor deduplicates the account list and remaps instruction indices to avoid the 64-account transaction limit.
+
+**AMM discriminators:**
+| AMM | Discriminator (8 bytes) |
+|-----|------------------------|
+| Raydium V4 | `09 00 00 00 00 00 00 00` |
+| Orca Whirlpool | `f8 c6 9e 91 e1 75 87 c8` (SHA256("global:swap")[..8]) |
+| Meteora DLMM | `e4 45 a5 2e 51 cb 9a 1d` |
+
+### 9.4 WebSocket Mempool Subscription
+
+Real-time mempool monitoring via `tokio-tungstenite`:
+
+```
+Connect(wss://endpoint)
+  → Send: logsSubscribe({mentions: [program_ids]}, {commitment: "processed"})
+  → Recv: Log notifications containing:
+    - signature (base58)
+    - logs[] (array of "Program X invoke [N]" strings)
+    - slot (u64)
+  → Parse: Extract program IDs from "Program X invoke" lines
+  → Filter: Bloom filter O(1) check against target AMM programs
+  → Dispatch: MempoolTransaction → mpsc channel → ASTE event queue
+```
+
+**Auto-reconnect:** On WebSocket close or error, wait 2 seconds and reconnect. Each endpoint runs in its own `tokio::spawn` task.
+
+### 9.5 Pool Discovery
+
+The `PoolDiscovery` module fetches real AMM pool state from the Solana blockchain:
+
+**Raydium V4 account data layout (key offsets):**
+```
+Offset 0:    status (u64)
+Offset 32:   base_decimal (u64)
+Offset 40:   quote_decimal (u64)
+Offset 88:   coin_lot_size (u64)
+Offset 96:   pc_lot_size (u64)
+Offset 680:  pool_coin_token_account (Pubkey, 32 bytes)
+Offset 712:  pool_pc_token_account (Pubkey, 32 bytes)
+```
+
+Data is fetched via `getAccountInfo` with base64 encoding, then decoded and parsed using custom base64 decoder (no external dependency).
+
+---
+
+## 10. Treasury and Off-Ramp Pipeline
+
+### 10.1 Five-Level Architecture
+
+The treasury converts on-chain yield to fiat bank deposits through five autonomous stages:
+
+```
+┌─────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────┐    ┌─────────────┐
+│  ACCUMULATE │───→│ CONSOLIDATE  │───→│ THRESHOLD GATE│───→│ OFF-RAMP │───→│  BANK WIRE  │
+│  ZK+MEV+ML  │    │ SOL→USDC     │    │ >$100 USD     │    │ Exchange │    │  ACH/SEPA   │
+│  Profits    │    │ via Jupiter  │    │ + cooldown    │    │  API     │    │  withdrawal │
+└─────────────┘    └──────────────┘    └───────────────┘    └──────────┘    └─────────────┘
+```
+
+### 10.2 Consolidation via Jupiter Aggregator
+
+Jupiter is Solana's DEX aggregator (routes across Raydium, Orca, Meteora, etc.).
+
+**Quote API:** `GET https://quote-api.jup.ag/v6/quote?inputMint=SOL&outputMint=USDC&amount=<lamports>&slippageBps=50`
+
+**Swap API:** `POST https://quote-api.jup.ag/v6/swap` with the quote response + user public key. Returns a serialized transaction to sign and submit.
+
+### 10.3 Exchange API Signing
+
+**Coinbase (HMAC-SHA256):**
+```
+signature = HMAC-SHA256(
+  key: api_secret,
+  message: timestamp + method + path + body
+)
+Headers: CB-ACCESS-KEY, CB-ACCESS-SIGN, CB-ACCESS-TIMESTAMP, CB-ACCESS-PASSPHRASE
+```
+
+**Kraken (HMAC-SHA512):**
+```
+signature = HMAC-SHA512(
+  key: base64_decode(api_secret),
+  message: path + SHA256(nonce + body)
+)
+Headers: API-Key, API-Sign
+```
+
+### 10.4 Off-Ramp Flow
+
+1. **Sell USDC:** POST market sell order (USDC-USD on Coinbase, USDCUSD on Kraken)
+2. **Wait for fill:** Poll order status until `settled` (Coinbase) or `closed` (Kraken)
+3. **Withdraw fiat:** POST withdrawal to pre-configured bank account (payment method ID)
+4. **Record:** Update treasury metrics, sign event via Crypto Traces
+
+### 10.5 EVM Support (Solidity Contracts)
+
+For Ethereum/Arbitrum/Base/Polygon chains:
+
+**ProfitVault.sol** — Owner-controlled vault with reentrancy guard:
+- `deposit()` — receive ETH
+- `withdrawAll()` / `withdrawTo(address, amount)` — extract profits
+- `withdrawToken(IERC20, to, amount)` — extract ERC20 tokens
+- Events: ProfitDeposited, FundsWithdrawn, TokenWithdrawn
+
+**FlashArbitrage.sol** — Zero-capital atomic cross-DEX arbitrage:
+- `executeArbitrage()` — initiate Uniswap V2 flash swap
+- `uniswapV2Call()` — callback: swap on second DEX, validate profit, repay loan + send profit to vault
+- Reverts if profit < minimum threshold (atomic safety)
+
+### 10.6 Dynamic Thresholding
+
+The treasury keeper adjusts consolidation thresholds based on gas conditions:
+
+```
+effective_threshold = base_threshold × gas_multiplier
+gas_multiplier = max(1.0, current_gas / target_gas)
+```
+
+When gas is expensive, the keeper waits for larger accumulations before consolidating (amortizing gas over more value).
+
+---
+
+## 11. Risk and Governance
+
+### 11.1 Circuit Breaker
 
 ```python
 if consecutive_losses >= 10:
@@ -653,22 +880,22 @@ The circuit breaker is implemented in the Python orchestrator layer (not Rust) b
 2. It must survive Rust daemon crashes
 3. It integrates with the workforce governance stack (Human Gate, Crypto Traces)
 
-### 9.2 Slashing Protection
+### 11.2 Slashing Protection
 
 ZK prover networks penalize failed proofs (slashing). Our protection:
 - **max_stake_fraction = 10%** — never stake more than 10% of total capital
 - **Deadline monitoring** — abort proof generation if estimated completion exceeds deadline
 - **Cost estimation** — only bid on proofs where estimated cost < 85% of max reward
 
-### 9.3 Audit Trail
+### 11.3 Audit Trail
 
 Every action is logged to `runtime/yield_daemon/audit.jsonl` and signed via the workforce Crypto Traces engine (HMAC-SHA256 chain with tamper detection).
 
 ---
 
-## 10. Orchestrator Integration
+## 12. Orchestrator Integration
 
-### 10.1 Cycle Slots 134-136
+### 12.1 Cycle Slots 134-136
 
 The Yield Daemon occupies three orchestrator cycle slots:
 
@@ -678,7 +905,7 @@ The Yield Daemon occupies three orchestrator cycle slots:
 | 135 | MEV Arbitrage | 30s | opportunities, bundles_submitted, revenue_sat |
 | 136 | ML Subnet | 30s | inferences, training_rounds, revenue_sat |
 
-### 10.2 Engine Wiring
+### 12.2 Engine Wiring
 
 ```
 YieldDaemon ←→ Revenue Engine (P&L tracking)
@@ -691,7 +918,7 @@ YieldDaemon ←→ Constitutional Governance (risk limits)
 YieldDaemon ←→ Human Gate (live mode approval)
 ```
 
-### 10.3 Feedback Loops
+### 12.3 Feedback Loops
 
 1. **YieldDaemon → RevenueEngine → EvoRL → YieldDaemon:** Profitable strategies evolve via genetic optimization
 2. **YieldDaemon → EconomicMetrics → DecisionEngine → YieldDaemon:** Cost-inefficient domains get reduced allocation
@@ -699,9 +926,9 @@ YieldDaemon ←→ Human Gate (live mode approval)
 
 ---
 
-## 11. Benchmarking Methodology
+## 13. Benchmarking Methodology
 
-### 11.1 Statistical Rigor
+### 13.1 Statistical Rigor
 
 All benchmarks use Criterion.rs, which:
 - Runs warmup iterations to fill caches
@@ -709,7 +936,7 @@ All benchmarks use Criterion.rs, which:
 - Reports mean ± confidence interval
 - Detects performance regressions via statistical comparison
 
-### 11.2 Benchmark Suite
+### 13.2 Benchmark Suite
 
 | Benchmark | Input Size | Expected Time | Measures |
 |-----------|-----------|--------------|----------|
@@ -721,7 +948,7 @@ All benchmarks use Criterion.rs, which:
 | Arena alloc 64B × 1000 | 1000 allocs | <5μs | Allocation throughput |
 | Arena reset | Single | <1ns | Reset overhead |
 
-### 11.3 Continuous Performance Monitoring
+### 13.3 Continuous Performance Monitoring
 
 The Python orchestrator tracks per-cycle metrics:
 - `elapsed_ms` per orchestrator cycle
@@ -733,9 +960,9 @@ Regressions trigger alerts via the Error Escalation Hub.
 
 ---
 
-## 12. Deployment Architecture
+## 14. Deployment Architecture
 
-### 12.1 Hardware Recommendations
+### 14.1 Hardware Recommendations
 
 | Component | ZK Prover | MEV Bot | ML Miner |
 |-----------|-----------|---------|----------|
@@ -745,7 +972,7 @@ Regressions trigger alerts via the Error Escalation Hub.
 | Network | 10GbE | 25GbE + kernel bypass | 10GbE |
 | Storage | 1TB NVMe | 256GB NVMe | 2TB NVMe |
 
-### 12.2 Co-location
+### 14.2 Co-location
 
 For competitive MEV extraction, co-locate servers in the same data center as:
 - **Solana validators** (particularly Jito validators)
@@ -753,7 +980,7 @@ For competitive MEV extraction, co-locate servers in the same data center as:
 
 Network latency to the block engine should be <5ms for competitive bundle submission.
 
-### 12.3 Legal Structure
+### 14.3 Legal Structure
 
 For US-based operators:
 1. **DBA filing** — Register assumed business name with county clerk
@@ -797,4 +1024,4 @@ Montgomery -p⁻¹ mod 2^64 = 0xc2e1f593efffffff
 
 ---
 
-*Document version: 0.1.0 | Last updated: 2026-06-10 | AI Cowboys*
+*Document version: 0.2.0 | Last updated: 2026-06-18 | AI Cowboys*
