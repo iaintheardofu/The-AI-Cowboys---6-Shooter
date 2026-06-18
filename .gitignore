@@ -6,3 +6,9 @@
 
 # Release artifacts
 deploy/dist/
+
+# Secrets — NEVER commit
+.env
+*.pem
+*.key
+keypair.json

@@ -1,0 +1,17 @@
+# ============================================================================
+# Off-Ramp Orchestrator — Python runtime
+# ============================================================================
+
+FROM python:3.12-slim-bookworm
+
+RUN useradd -m -s /bin/bash offramp
+
+WORKDIR /app
+COPY orchestrator/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY orchestrator/ /app/orchestrator/
+
+USER offramp
+
+ENTRYPOINT ["python3", "-m", "orchestrator.offramp"]

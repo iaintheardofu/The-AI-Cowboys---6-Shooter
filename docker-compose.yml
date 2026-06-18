@@ -1,0 +1,100 @@
+version: "3.8"
+
+# ============================================================================
+# Yield Daemon — Full Autonomous Income Stack
+# ============================================================================
+# Deploys three services:
+#   1. yield-daemon  — Rust HPC engine (ZK prover, MEV/ASTE, ML subnet)
+#   2. offramp       — Python off-ramp orchestrator (crypto -> bank)
+#   3. prometheus     — Metrics collection and alerting
+#
+# Usage:
+#   cp .env.example .env      # Configure credentials
+#   docker compose build
+#   docker compose up -d      # Start all services
+#   docker compose logs -f    # Watch live output
+#
+# Architecture:
+#   [Blockchain] <-> [yield-daemon:9191] -> [metrics/] -> [offramp] -> [Exchange] -> [Bank]
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # Core Engine — Rust yield daemon
+  # --------------------------------------------------------------------------
+  yield-daemon:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: yield-daemon
+    restart: unless-stopped
+    environment:
+      - RUST_LOG=info
+    env_file:
+      - .env
+    volumes:
+      - daemon-state:/var/lib/yield-daemon
+      - ./config.toml:/app/config.toml:ro
+    ports:
+      - "9191:9191"  # Prometheus metrics endpoint
+    networks:
+      - yield-net
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+        reservations:
+          cpus: "2"
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9191/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # --------------------------------------------------------------------------
+  # Off-Ramp Orchestrator — Python crypto-to-bank pipeline
+  # --------------------------------------------------------------------------
+  offramp:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.offramp
+    container_name: yield-offramp
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - YIELD_STATE_DIR=/var/lib/yield-daemon
+    volumes:
+      - daemon-state:/var/lib/yield-daemon:ro
+    depends_on:
+      yield-daemon:
+        condition: service_healthy
+    networks:
+      - yield-net
+
+  # --------------------------------------------------------------------------
+  # Prometheus — Metrics scraping
+  # --------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: yield-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - yield-net
+    depends_on:
+      - yield-daemon
+
+volumes:
+  daemon-state:
+  prometheus-data:
+
+networks:
+  yield-net:
+    driver: bridge

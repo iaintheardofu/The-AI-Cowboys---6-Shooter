@@ -5,7 +5,7 @@
 //! 2. MEV Arbitrage / Intent Solving — sub-millisecond on-chain extraction
 //! 3. Decentralized ML Subnets (Bittensor) — distributed AI inference
 
-use yield_daemon::{config, zk_prover, mev, ml_subnet, DaemonState, DaemonMetrics};
+use yield_daemon::{config, zk_prover, mev, ml_subnet, treasury, DaemonState, DaemonMetrics};
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -91,6 +91,20 @@ async fn main() -> anyhow::Result<()> {
         }));
     }
 
+    // ── Treasury / Off-Ramp Pipeline ──────────────────────────────────────
+    // The treasury module monitors accumulated profits across all domains,
+    // consolidates volatile tokens to stablecoins, and triggers automated
+    // fiat withdrawals to the operator's bank account.
+    if state.config.treasury.enabled {
+        let s = state.clone();
+        handles.push(tokio::spawn(async move {
+            info!("[Treasury] Off-ramp pipeline starting");
+            if let Err(e) = treasury::run(s).await {
+                error!("[Treasury] Pipeline error: {}", e);
+            }
+        }));
+    }
+
     let uptime_state = state.clone();
     tokio::spawn(async move {
         let start = std::time::Instant::now();
@@ -133,6 +147,12 @@ async fn main() -> anyhow::Result<()> {
                 "inferences": m.ml_inferences_served.load(Relaxed),
                 "training_rounds": m.ml_training_rounds.load(Relaxed),
                 "revenue_sat": m.ml_revenue_sat.load(Relaxed),
+            }));
+            write_metrics_file(&state_dir.join("treasury_metrics.json"), &serde_json::json!({
+                "profit_accumulated": m.treasury_profit_accumulated.load(Relaxed),
+                "stablecoin_balance": m.treasury_stablecoin_balance.load(Relaxed),
+                "fiat_withdrawn_cents": m.treasury_fiat_withdrawn_cents.load(Relaxed),
+                "offramp_cycles": m.treasury_offramp_cycles.load(Relaxed),
             }));
             // Sleep in 1s steps so shutdown stays responsive.
             for _ in 0..interval {
@@ -228,6 +248,10 @@ fn render_prometheus(m: &DaemonMetrics) -> String {
     emit!("yield_daemon_aste_arb_detected", "ASTE arbitrage cycles detected", "counter", m.aste_arb_detected.load(Relaxed));
     emit!("yield_daemon_aste_arb_profitable", "ASTE profitable arbitrages", "counter", m.aste_arb_profitable.load(Relaxed));
     emit!("yield_daemon_aste_latency_ns", "ASTE avg cycle latency nanoseconds", "gauge", m.aste_latency_ns.load(Relaxed));
+    emit!("yield_daemon_treasury_profit_accumulated", "Treasury total profit accumulated", "counter", m.treasury_profit_accumulated.load(Relaxed));
+    emit!("yield_daemon_treasury_stablecoin_balance", "Treasury stablecoin balance (micro-USD)", "gauge", m.treasury_stablecoin_balance.load(Relaxed));
+    emit!("yield_daemon_treasury_fiat_withdrawn_cents", "Treasury fiat withdrawn to bank (cents)", "counter", m.treasury_fiat_withdrawn_cents.load(Relaxed));
+    emit!("yield_daemon_treasury_offramp_cycles", "Treasury off-ramp cycles completed", "counter", m.treasury_offramp_cycles.load(Relaxed));
     out
 }
 

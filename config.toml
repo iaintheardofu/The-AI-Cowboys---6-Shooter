@@ -55,3 +55,30 @@ max_cycle_loss = 0.01
 circuit_breaker_threshold = 10
 max_stake_fraction = 0.10
 # daily_loss_limit = 100.0
+
+# ── Treasury / Off-Ramp Pipeline ──────────────────────────────────────────
+# Autonomous profit extraction: crypto profits -> stablecoin -> bank account
+[treasury]
+enabled = true
+dry_run = true   # Start in dry-run! Set false only after configuring credentials
+
+# Consolidation: swap volatile tokens to stablecoins when profit exceeds threshold
+consolidation_threshold = 50000000   # 0.05 SOL in lamports
+target_stablecoin = "USDC"
+# stablecoin_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # Solana USDC
+slippage_bps = 50  # 0.5% slippage tolerance
+
+# Off-ramp: transfer stablecoins to exchange and withdraw fiat to bank
+offramp_threshold_usd = 100.0     # Minimum USDC before triggering bank transfer
+max_offramp_usd = 10000.0         # Maximum single withdrawal
+exchange = "coinbase"              # coinbase or kraken
+fiat_currency = "USD"
+check_interval_secs = 300          # Check every 5 minutes
+
+# Credentials (use .env file or secrets manager in production)
+# exchange_api_key = ""
+# exchange_api_secret = ""
+# exchange_api_passphrase = ""     # Coinbase only
+# bank_account_id = ""             # From exchange withdrawal settings
+# wallet_keypair_path = ""         # Solana JSON keypair file
+# swap_router = ""                 # Jupiter (auto) or Uniswap V3 router address

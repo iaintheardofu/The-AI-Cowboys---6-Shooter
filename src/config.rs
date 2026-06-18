@@ -13,6 +13,8 @@ pub struct DaemonConfig {
     pub ml: MlConfig,
     #[serde(default)]
     pub risk: RiskConfig,
+    #[serde(default)]
+    pub treasury: crate::treasury::TreasuryConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -280,6 +282,7 @@ impl Default for DaemonConfig {
             mev: MevConfig::default(),
             ml: MlConfig::default(),
             risk: RiskConfig::default(),
+            treasury: crate::treasury::TreasuryConfig::default(),
         }
     }
 }

@@ -18,6 +18,8 @@ RUN cargo build --release --target x86_64-unknown-linux-musl \
 FROM scratch
 COPY --from=builder /yield-daemon /yield-daemon
 COPY --from=builder /build/config.toml /config.toml
+# State directory for metrics JSON bridge (shared with offramp via volume)
+VOLUME /var/lib/yield-daemon
 # Prometheus metrics port declared by the daemon CLI (see #2 in deploy README).
 EXPOSE 9191
 # --dry-run on purpose; override the CMD to go live after configuring config.toml.

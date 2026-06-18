@@ -4,6 +4,7 @@ pub mod net;
 pub mod zk_prover;
 pub mod mev;
 pub mod ml_subnet;
+pub mod treasury;
 
 use std::sync::atomic::AtomicBool;
 
@@ -32,6 +33,11 @@ pub struct DaemonMetrics {
     pub aste_arb_detected: std::sync::atomic::AtomicU64,
     pub aste_arb_profitable: std::sync::atomic::AtomicU64,
     pub aste_latency_ns: std::sync::atomic::AtomicU64,
+    // Treasury metrics
+    pub treasury_profit_accumulated: std::sync::atomic::AtomicU64,
+    pub treasury_stablecoin_balance: std::sync::atomic::AtomicU64,
+    pub treasury_fiat_withdrawn_cents: std::sync::atomic::AtomicU64,
+    pub treasury_offramp_cycles: std::sync::atomic::AtomicU64,
 }
 
 impl DaemonMetrics {
@@ -53,6 +59,10 @@ impl DaemonMetrics {
             aste_arb_detected: AtomicU64::new(0),
             aste_arb_profitable: AtomicU64::new(0),
             aste_latency_ns: AtomicU64::new(0),
+            treasury_profit_accumulated: AtomicU64::new(0),
+            treasury_stablecoin_balance: AtomicU64::new(0),
+            treasury_fiat_withdrawn_cents: AtomicU64::new(0),
+            treasury_offramp_cycles: AtomicU64::new(0),
         }
     }
 }
