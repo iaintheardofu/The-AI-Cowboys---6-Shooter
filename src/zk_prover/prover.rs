@@ -7,7 +7,7 @@
 //! 4. Submit proofs before deadline to earn rewards
 
 use crate::config::ZkConfig;
-use tracing::{info, warn, debug};
+use tracing::{info, debug};
 use std::time::Instant;
 
 pub struct ProofResult {
@@ -19,9 +19,9 @@ pub struct ProofResult {
 
 pub struct ZkProverNode {
     config: ZkConfig,
-    total_proofs: u64,
-    total_revenue: u64,
-    consecutive_failures: u32,
+    pub total_proofs: u64,
+    pub total_revenue: u64,
+    pub consecutive_failures: u32,
 }
 
 impl ZkProverNode {
@@ -35,7 +35,7 @@ impl ZkProverNode {
     }
 
     /// Main cycle: poll for requests, bid, prove, submit.
-    pub async fn poll_and_prove(&self) -> Result<ProofResult, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn poll_and_prove(&mut self) -> Result<ProofResult, Box<dyn std::error::Error + Send + Sync>> {
         // Phase 1: Poll prover network for available proof requests
         let request = self.poll_proof_request().await?;
 
@@ -84,6 +84,15 @@ impl ZkProverNode {
 
         let latency = start.elapsed().as_millis() as u64;
         let reward = if accepted { request.reward } else { 0 };
+
+        // Update tracking fields
+        if accepted {
+            self.total_proofs += 1;
+            self.total_revenue += reward;
+            self.consecutive_failures = 0;
+        } else {
+            self.consecutive_failures += 1;
+        }
 
         info!(
             "[ZK] Proof {} | accepted={} | reward={} | latency={}ms",

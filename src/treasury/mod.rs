@@ -193,7 +193,7 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
     // Build the keeper (consolidation + threshold logic)
     let keeper = keeper::TreasuryKeeper::new(config);
 
-    let check_interval = std::time::Duration::from_secs(config.check_interval_secs);
+    let _check_interval = std::time::Duration::from_secs(config.check_interval_secs);
 
     loop {
         if !state.running.load(Ordering::Relaxed) {

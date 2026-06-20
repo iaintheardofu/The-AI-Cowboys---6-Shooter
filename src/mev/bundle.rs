@@ -4,11 +4,10 @@
 //! Uses pre-allocated templates and branchless instruction serialization.
 //! Live mode submits via the LiveExecutor (Jito block engine REST API).
 
-use super::router::{ArbitrageRoute, OptimalInput, SwapDirection};
-use super::executor::{LiveExecutor, build_generic_swap};
-use crate::net::solana::{Keypair, SolanaInstruction, build_transfer_ix};
+use super::router::{ArbitrageRoute, OptimalInput};
+use super::executor::LiveExecutor;
+use crate::net::solana::SolanaInstruction;
 use std::sync::Arc;
-use tracing::{info, warn, debug};
 
 #[derive(Clone, Debug)]
 pub struct TransactionBundle {
@@ -107,11 +106,13 @@ impl BundleConstructor {
     }
 
     /// Build a swap instruction (serialized transaction bytes).
+    /// Encodes pool_id, token addresses, and amount for reconstruction
+    /// during live submission.
     fn build_swap_ix(
         &self,
-        _pool_id: &[u8; 32],
-        _token_in: &[u8; 32],
-        _token_out: &[u8; 32],
+        pool_id: &[u8; 32],
+        token_in: &[u8; 32],
+        token_out: &[u8; 32],
         amount: u128,
     ) -> Vec<u8> {
         // Pre-allocated instruction buffer
@@ -125,6 +126,11 @@ impl BundleConstructor {
 
         // Min output (16 bytes, zero = accept any, frontrun-protected by atomic bundle)
         buf.extend_from_slice(&0u128.to_le_bytes());
+
+        // Pool and token context (3 × 32 bytes) for live executor reconstruction
+        buf.extend_from_slice(pool_id);
+        buf.extend_from_slice(token_in);
+        buf.extend_from_slice(token_out);
 
         buf
     }

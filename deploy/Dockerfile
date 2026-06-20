@@ -14,11 +14,12 @@ ENV CC_x86_64_unknown_linux_musl=musl-gcc \
 RUN cargo build --release --target x86_64-unknown-linux-musl \
     && cp target/x86_64-unknown-linux-musl/release/yield-daemon /yield-daemon
 
-# ---- Runtime (scratch — binary is fully static) ----
-FROM scratch
+# ---- Runtime (distroless — static binary + writable tmpfs) ----
+FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /yield-daemon /yield-daemon
 COPY --from=builder /build/config.toml /config.toml
-# State directory for metrics JSON bridge (shared with offramp via volume)
+# State directory for metrics JSON files (shared with offramp via volume).
+# distroless provides a writable /tmp; VOLUME creates a writable mount point.
 VOLUME /var/lib/yield-daemon
 # Prometheus metrics port declared by the daemon CLI (see #2 in deploy README).
 EXPOSE 9191

@@ -119,9 +119,23 @@ impl TreasuryKeeper {
         );
 
         // Step 2: Get swap transaction
+        // Jupiter expects a base58 public key, not a file path.
+        // If we have a keypair file, load it and extract the pubkey.
+        let user_pubkey = if let Some(kp_path) = config.wallet_keypair_path.as_deref() {
+            match crate::net::solana::Keypair::load(std::path::Path::new(kp_path)) {
+                Ok(kp) => kp.pubkey_base58(),
+                Err(e) => {
+                    warn!("[Keeper] Failed to load keypair for Jupiter: {}", e);
+                    return Err("Wallet keypair required for Jupiter swap".into());
+                }
+            }
+        } else {
+            return Err("wallet_keypair_path not configured".into());
+        };
+
         let swap_body = serde_json::json!({
             "quoteResponse": quote_resp,
-            "userPublicKey": config.wallet_keypair_path.as_deref().unwrap_or(""),
+            "userPublicKey": user_pubkey,
             "wrapAndUnwrapSol": true,
         });
 

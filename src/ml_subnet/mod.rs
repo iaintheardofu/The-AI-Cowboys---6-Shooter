@@ -5,7 +5,7 @@ pub mod training;
 use crate::DaemonState;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// Run the ML Subnet miner module.
 /// Connects to Bittensor (or compatible) network, serves inference
@@ -26,7 +26,7 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
         let train_config = config.clone();
         tokio::spawn(async move {
             info!("[ML] Background training loop started");
-            let trainer = training::BackgroundTrainer::new(&train_config);
+            let mut trainer = training::BackgroundTrainer::new(&train_config);
             loop {
                 if !train_state.running.load(Ordering::Relaxed) {
                     break;

@@ -31,7 +31,7 @@ impl NttDomain {
 
         // Primitive root of unity for BN254 scalar field.
         // omega = generator^((p-1)/n) where generator = 5
-        let generator = MontgomeryU256::from_u64(5);
+        let _generator = MontgomeryU256::from_u64(5);
 
         // For BN254, (p-1) is divisible by 2^28, so max NTT size = 2^28.
         // omega = 5^((p-1)/2^log_n) mod p
@@ -188,9 +188,19 @@ fn compute_root_of_unity(log_n: u32) -> MontgomeryU256 {
     // For BN254, TWO_ADICITY = 28 (max log_n)
     assert!(log_n <= 28, "NTT size exceeds BN254 two-adicity (max 2^28)");
 
-    // Start with a known 2^28-th root of unity (precomputed).
-    // This is g^((p-1)/2^28) where g=5
-    let root_of_unity_2_28 = MontgomeryU256::from_u64(5);
+    // Compute g^((p-1)/2^28) to get the primitive 2^28-th root of unity.
+    // p-1 = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000
+    // (p-1)/2^28 = p-1 >> 28
+    // Exponent: (p-1) / 2^28
+    let exp_p1_div_2_28: [u64; 4] = [
+        0x9b9709143e1f593f,
+        0x181585d2833e8487,
+        0xe131a029b85045b6,
+        0x0000000030644e72,
+    ];
+
+    let generator = MontgomeryU256::from_u64(5);
+    let root_of_unity_2_28 = generator.mont_pow(&exp_p1_div_2_28);
 
     // Square (28 - log_n) times to get a 2^log_n-th root
     let mut omega = root_of_unity_2_28;

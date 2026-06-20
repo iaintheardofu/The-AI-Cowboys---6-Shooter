@@ -4,7 +4,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-75%20Rust%20%2B%2026%20Python-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-75%20Rust-brightgreen.svg)]()
 [![Binary](https://img.shields.io/badge/Binary-3.4MB%20arm64-blue.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 

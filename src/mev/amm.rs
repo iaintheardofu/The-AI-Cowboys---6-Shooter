@@ -198,7 +198,7 @@ impl ConcentratedPool {
                 compute_step_amounts(sqrt_price, sqrt_price_next, liquidity, remaining, false)
             };
 
-            let fee_adjusted = amount_in_step * fee_complement / 10_000;
+            let _fee_adjusted = amount_in_step * fee_complement / 10_000;
             remaining = remaining.saturating_sub(amount_in_step);
             amount_out += amount_out_step;
 

@@ -9,7 +9,6 @@
 //! so a single cache-line prefetch brings 4 pool reserves (4 × u128 = 64B).
 //! The CPU's hardware prefetcher will stream sequential reads at L1 bandwidth.
 
-use crate::memory::cache::CACHE_LINE;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Maximum number of pools tracked in the shadow state.

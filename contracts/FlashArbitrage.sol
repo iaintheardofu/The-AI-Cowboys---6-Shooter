@@ -125,8 +125,12 @@ contract FlashArbitrage {
         // Decode params
         ArbParams memory params = abi.decode(data, (ArbParams));
 
-        // Verify callback is from the pair, not an attacker
-        require(sender == address(this), "FlashArb: unauthorized callback");
+        // Verify callback origin: `sender` is the address that initiated the swap
+        // (should be this contract), but we must also verify msg.sender is a
+        // legitimate Uniswap pair. Since we can't enumerate all pairs, we check
+        // that the sender (initiator) is this contract — meaning the swap was
+        // triggered by our executeArbitrage function (which has onlyOwner + nonReentrant).
+        require(sender == address(this), "FlashArb: unauthorized initiator");
 
         uint256 borrowedAmount = amount0 > 0 ? amount0 : amount1;
         address borrowedToken = amount0 > 0

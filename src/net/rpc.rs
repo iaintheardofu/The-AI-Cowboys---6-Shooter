@@ -4,9 +4,7 @@
 //! Pre-serializes common requests to avoid allocation on hot path.
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct RpcConfig {

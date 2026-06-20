@@ -7,7 +7,7 @@ pub mod prover;
 use crate::DaemonState;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// Run the ZK Prover module event loop.
 /// Polls prover networks for proof requests, evaluates bids,
@@ -19,7 +19,7 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
     info!("[ZK] Pippenger window: {}", state.config.zk.pippenger_window);
     info!("[ZK] Max concurrent proofs: {}", state.config.zk.max_concurrent_proofs);
 
-    let prover = prover::ZkProverNode::new(&state.config.zk);
+    let mut prover = prover::ZkProverNode::new(&state.config.zk);
 
     while state.running.load(Ordering::Relaxed) {
         match prover.poll_and_prove().await {

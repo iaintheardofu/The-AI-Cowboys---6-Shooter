@@ -76,6 +76,64 @@ impl ProjectivePoint {
         Self { x: x3, y: y3, z: z3 }
     }
 
+    /// Convert projective point to affine coordinates.
+    /// Computes (X/Z^2, Y/Z^3) via modular inverse of Z.
+    pub fn to_affine(&self) -> AffinePoint {
+        if self.is_identity() {
+            return AffinePoint {
+                x: MontgomeryU256::ZERO,
+                y: MontgomeryU256::ZERO,
+                infinity: true,
+            };
+        }
+        let z_inv = self.z.mont_inv();
+        let z_inv2 = z_inv.mont_sqr();
+        let z_inv3 = z_inv2.mont_mul(&z_inv);
+        AffinePoint {
+            x: self.x.mont_mul(&z_inv2),
+            y: self.y.mont_mul(&z_inv3),
+            infinity: false,
+        }
+    }
+
+    /// Projective point addition: self + rhs (both Jacobian).
+    #[inline]
+    pub fn add(&self, rhs: &ProjectivePoint) -> Self {
+        if self.is_identity() {
+            return *rhs;
+        }
+        if rhs.is_identity() {
+            return *self;
+        }
+
+        let z1z1 = self.z.mont_sqr();
+        let z2z2 = rhs.z.mont_sqr();
+
+        let u1 = self.x.mont_mul(&z2z2);
+        let u2 = rhs.x.mont_mul(&z1z1);
+
+        let s1 = self.y.mont_mul(&rhs.z).mont_mul(&z2z2);
+        let s2 = rhs.y.mont_mul(&self.z).mont_mul(&z1z1);
+
+        let h = u2.mont_sub(&u1);
+        let r = s2.mont_sub(&s1);
+
+        // If h == 0 and r == 0, points are equal → use doubling
+        if h.limbs == [0; 4] && r.limbs == [0; 4] {
+            return self.double();
+        }
+
+        let hh = h.mont_sqr();
+        let hhh = h.mont_mul(&hh);
+        let v = u1.mont_mul(&hh);
+
+        let x3 = r.mont_sqr().mont_sub(&hhh).mont_sub(&v).mont_sub(&v);
+        let y3 = r.mont_mul(&v.mont_sub(&x3)).mont_sub(&s1.mont_mul(&hhh));
+        let z3 = self.z.mont_mul(&rhs.z).mont_mul(&h);
+
+        Self { x: x3, y: y3, z: z3 }
+    }
+
     /// Mixed addition: self + affine point (Z2=1, saves 4 multiplications).
     #[inline]
     pub fn add_affine(&self, rhs: &AffinePoint) -> Self {
@@ -161,28 +219,17 @@ pub fn pippenger_msm(
         }
 
         // Aggregate buckets: sum = B[k]*k = B[k] + B[k+1] + ... + B[2^w-1]
-        // computed via running sum from top
+        // computed via running sum from top.
+        // Use projective addition (not fake affine from raw projective coords).
         let mut running_sum = ProjectivePoint::IDENTITY;
         let mut window_sum = ProjectivePoint::IDENTITY;
 
         for j in (0..num_buckets).rev() {
-            running_sum = running_sum.add_affine(&AffinePoint {
-                x: buckets[j].x,
-                y: buckets[j].y,
-                infinity: buckets[j].is_identity(),
-            });
-            window_sum = window_sum.add_affine(&AffinePoint {
-                x: running_sum.x,
-                y: running_sum.y,
-                infinity: running_sum.is_identity(),
-            });
+            running_sum = running_sum.add(&buckets[j]);
+            window_sum = window_sum.add(&running_sum);
         }
 
-        result = result.add_affine(&AffinePoint {
-            x: window_sum.x,
-            y: window_sum.y,
-            infinity: window_sum.is_identity(),
-        });
+        result = result.add(&window_sum);
     }
 
     result

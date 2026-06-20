@@ -9,10 +9,9 @@
 //! All instruction layouts are pre-computed for zero-allocation on the hot path.
 
 use crate::net::solana::{
-    Keypair, SolanaTransaction, SolanaInstruction, JitoClient, LiveRpc,
-    bs58_encode, bs58_decode, build_transfer_ix,
+    Keypair, SolanaTransaction, SolanaInstruction, JitoClient, LiveRpc, bs58_decode, build_transfer_ix,
 };
-use tracing::{info, warn, error, debug};
+use tracing::info;
 
 // ── AMM Program Discriminators ──────────────────────────────────────────────
 
@@ -208,7 +207,7 @@ impl LiveExecutor {
         let mut instructions: Vec<SolanaInstruction> = Vec::new();
 
         for (accounts, ix) in swap_ixs {
-            let base_idx = all_accounts.len() as u8;
+            let _base_idx = all_accounts.len() as u8;
             // Deduplicate accounts
             for acc in &accounts {
                 if !all_accounts.contains(acc) {

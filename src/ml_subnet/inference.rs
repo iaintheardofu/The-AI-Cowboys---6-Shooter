@@ -90,9 +90,18 @@ pub fn scaled_dot_product_attention(
 ) {
     let scale = 1.0 / (d_model as f32).sqrt();
 
+    // Transpose K from (seq_len × d_model) to (d_model × seq_len)
+    // so that gemm_tiled computes Q @ K^T correctly.
+    let mut key_t = vec![0.0f32; d_model * seq_len];
+    for i in 0..seq_len {
+        for j in 0..d_model {
+            key_t[j * seq_len + i] = key[i * d_model + j];
+        }
+    }
+
     // QK^T: (seq_len × d_model) × (d_model × seq_len) = seq_len × seq_len
     let mut scores = vec![0.0f32; seq_len * seq_len];
-    gemm_tiled(query, key, &mut scores, seq_len, d_model, seq_len);
+    gemm_tiled(query, &key_t, &mut scores, seq_len, d_model, seq_len);
 
     // Scale
     for s in scores.iter_mut() {

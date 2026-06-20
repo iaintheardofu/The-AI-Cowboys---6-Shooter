@@ -415,8 +415,14 @@ def run_offramp_loop(config: OfframpConfig):
                             f"[Cycle {cycle_count}] Jupiter quote: "
                             f"{swap_amount_sol:.4f} SOL -> {usdc_received:.2f} USDC"
                         )
-                        # In production: sign and submit the swap transaction
-                        usdc_balance += usdc_received
+                        # TODO: sign and submit the swap transaction via
+                        # Jupiter v6 /swap endpoint + ed25519 signing.
+                        # Until swap submission is implemented, do NOT
+                        # credit usdc_balance — the swap hasn't executed.
+                        LOG.warning(
+                            f"[Cycle {cycle_count}] Swap submission not yet "
+                            f"implemented — quote only, no balance credited"
+                        )
 
             # ── Step 4: Off-ramp (USDC -> Bank) ──────────────────────
             if usdc_balance >= config.offramp_threshold_usd:

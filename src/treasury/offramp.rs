@@ -10,7 +10,7 @@
 
 use super::TreasuryConfig;
 use sha2::Sha256;
-use tracing::{info, warn, debug};
+use tracing::info;
 
 /// Off-ramp client that bridges crypto profits to bank accounts.
 pub struct OfframpClient {
@@ -79,7 +79,7 @@ impl OfframpClient {
     pub async fn execute_offramp(
         &self,
         amount_usd: f64,
-        config: &TreasuryConfig,
+        _config: &TreasuryConfig,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         if self.dry_run {
             info!("[Offramp] DRY RUN: would withdraw ${:.2} {} to bank", amount_usd, self.fiat_currency);
@@ -226,7 +226,13 @@ impl OfframpClient {
         use hmac::{Hmac, Mac};
 
         let timestamp = chrono::Utc::now().timestamp().to_string();
-        let body_str = serde_json::to_string(body)?;
+        // For GET requests, sign over empty body (Coinbase spec).
+        // Signing over "{}" would produce an invalid HMAC.
+        let body_str = if body.is_null() || method == "GET" {
+            String::new()
+        } else {
+            serde_json::to_string(body)?
+        };
 
         // Signature: HMAC-SHA256(timestamp + method + path + body)
         let prehash = format!("{}{}{}{}", timestamp, method, path, body_str);
@@ -238,17 +244,20 @@ impl OfframpClient {
         let signature = hex::encode(mac.finalize().into_bytes());
 
         let url = format!("{}{}", base_url, path);
-        let resp = self.http.request(
+        let mut req = self.http.request(
             method.parse().unwrap_or(reqwest::Method::POST),
             &url,
         )
             .header("CB-ACCESS-KEY", &self.api_key)
             .header("CB-ACCESS-SIGN", &signature)
-            .header("CB-ACCESS-TIMESTAMP", &timestamp)
-            .header("Content-Type", "application/json")
-            .body(body_str)
-            .send()
-            .await?;
+            .header("CB-ACCESS-TIMESTAMP", &timestamp);
+
+        // Only attach body for non-GET requests
+        if !body_str.is_empty() {
+            req = req.header("Content-Type", "application/json").body(body_str);
+        }
+
+        let resp = req.send().await?;
 
         let status = resp.status();
         let text = resp.text().await?;
@@ -319,8 +328,9 @@ impl OfframpClient {
     pub async fn get_balances(&self) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
         match &self.exchange {
             ExchangeType::Coinbase => {
+                // GET requests: sign over empty body, don't send a JSON body
                 self.coinbase_signed_request(
-                    "GET", "/api/v3/brokerage/accounts", &serde_json::json!({}),
+                    "GET", "/api/v3/brokerage/accounts", &serde_json::json!(null),
                     "https://api.coinbase.com",
                 ).await
             }
@@ -336,7 +346,7 @@ impl OfframpClient {
 
 /// Simple base64 encode (no padding).
 fn base64_encode(data: &[u8]) -> String {
-    use std::fmt::Write;
+    
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
     for chunk in data.chunks(3) {

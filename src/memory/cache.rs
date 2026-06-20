@@ -161,30 +161,45 @@ impl AmmPool {
     }
 
     /// Optimal input for max profit across two pools (A->B on pool1, B->A on pool2).
-    /// Binary search over input amounts (branchless-friendly).
+    /// Ternary search over input amounts — profit is unimodal (concave),
+    /// so ternary search correctly finds the peak.
     pub fn optimal_arb_input(pool1: &AmmPool, pool2: &AmmPool, max_input: u128) -> (u128, u128) {
+        let profit_at = |input: u128| -> i128 {
+            let out_b = pool1.swap_x_to_y(input);
+            let out_a = pool2.swap_y_to_x(out_b);
+            out_a as i128 - input as i128
+        };
+
         let mut lo: u128 = 1;
         let mut hi: u128 = max_input;
         let mut best_input: u128 = 0;
-        let mut best_profit: u128 = 0;
+        let mut best_profit: i128 = 0;
 
-        while lo <= hi {
-            let mid = lo + (hi - lo) / 2;
-            let out_b = pool1.swap_x_to_y(mid);
-            let out_a = pool2.swap_y_to_x(out_b);
-            if out_a > mid {
-                let profit = out_a - mid;
-                if profit > best_profit {
-                    best_profit = profit;
-                    best_input = mid;
-                }
-                lo = mid + 1;
+        // Ternary search: 60 iterations gives precision to 1 unit
+        for _ in 0..60 {
+            if lo >= hi { break; }
+            let m1 = lo + (hi - lo) / 3;
+            let m2 = hi - (hi - lo) / 3;
+            let p1 = profit_at(m1);
+            let p2 = profit_at(m2);
+            if p1 < p2 {
+                lo = m1 + 1;
             } else {
-                if mid == 0 { break; }
-                hi = mid - 1;
+                if m2 == 0 { break; }
+                hi = m2 - 1;
             }
         }
-        (best_input, best_profit)
+
+        // Check the converged range for the best value
+        for x in lo..=hi.min(lo + 2) {
+            let p = profit_at(x);
+            if p > best_profit {
+                best_profit = p;
+                best_input = x;
+            }
+        }
+
+        (best_input, if best_profit > 0 { best_profit as u128 } else { 0 })
     }
 }
 

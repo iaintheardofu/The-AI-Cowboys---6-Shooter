@@ -10,10 +10,9 @@
 //! No `solana-sdk` dependency — we implement the wire format directly
 //! for minimal binary size and maximum control over the hot path.
 
-use sha2::{Sha256, Digest};
 use ed25519_dalek::{SigningKey, Signer, VerifyingKey};
 use std::path::Path;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn};
 
 // ── Ed25519 Keypair ─────────────────────────────────────────────────────────
 
@@ -287,7 +286,10 @@ impl JitoClient {
             .and_then(|v| v.as_f64())
             .unwrap_or(1000.0); // Default 1000 lamports
 
-        Ok((floor * 1e9) as u64) // Convert SOL to lamports
+        // Jito returns tip values already in lamports (u64-compatible).
+        // landed_tips_50th_percentile is reported in SOL as a float,
+        // so multiply by 1e9 to convert SOL → lamports.
+        Ok((floor * 1e9) as u64)
     }
 }
 

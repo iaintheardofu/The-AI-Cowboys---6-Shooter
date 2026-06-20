@@ -32,7 +32,7 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
     let arena = Arena::new(config.arena_size_bytes);
 
     // Build AMM pool registry
-    let mut pool_registry = amm::PoolRegistry::new();
+    let pool_registry = amm::PoolRegistry::new();
 
     // Mempool transaction channel
     let (tx_sender, mut tx_receiver) = mpsc::channel::<crate::net::p2p::MempoolTransaction>(10_000);

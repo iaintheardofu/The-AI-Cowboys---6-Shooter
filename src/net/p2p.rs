@@ -5,7 +5,6 @@
 //! Live mode uses tokio-tungstenite for real WebSocket connections.
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error, debug};
 use futures_util::{StreamExt, SinkExt};

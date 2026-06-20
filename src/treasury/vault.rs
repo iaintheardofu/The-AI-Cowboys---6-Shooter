@@ -8,7 +8,7 @@
 //! - Balance queries for threshold checks
 //! - Batch withdrawal to exchange deposit address
 
-use tracing::{info, warn, debug};
+use tracing::info;
 
 /// Chain-agnostic vault interface.
 pub struct OnChainVault {

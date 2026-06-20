@@ -66,7 +66,7 @@ impl SimdSolver {
         // because they have no data dependencies between them.
         let chunks = cycles.chunks(4);
         for chunk in chunks {
-            for (offset, cycle) in chunk.iter().enumerate() {
+            for (_offset, cycle) in chunk.iter().enumerate() {
                 if let Some(result) = self.evaluate_single(shadow, cycle, results.len()) {
                     results.push(result);
                 }

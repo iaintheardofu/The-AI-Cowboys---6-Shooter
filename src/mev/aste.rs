@@ -31,7 +31,7 @@ use crate::DaemonState;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use tracing::{info, warn, debug, error};
+use tracing::{info, warn, debug};
 use tokio::sync::mpsc;
 
 /// ASTE configuration.

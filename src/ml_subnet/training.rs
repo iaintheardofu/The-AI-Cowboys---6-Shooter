@@ -5,7 +5,7 @@
 //! accumulation for memory-efficient training on large batch sizes.
 
 use crate::config::MlConfig;
-use tracing::{info, debug};
+use tracing::debug;
 
 pub struct BackgroundTrainer {
     config: MlConfig,
@@ -24,7 +24,9 @@ impl BackgroundTrainer {
 
     /// Execute a single training step.
     /// Returns the loss value for tracking convergence.
-    pub async fn train_step(&self) -> Result<f64, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn train_step(&mut self) -> Result<f64, Box<dyn std::error::Error + Send + Sync>> {
+        self.step += 1;
+
         // In production:
         // 1. Load micro-batch from training data
         // 2. Forward pass through model
@@ -35,9 +37,14 @@ impl BackgroundTrainer {
         // 7. Learning rate schedule (cosine annealing)
         // 8. Save checkpoint if best_loss improved
 
-        // Placeholder: simulate training
+        // Placeholder: simulate training with decaying loss
         let simulated_loss = 1.0 / (self.step as f64 + 1.0);
-        debug!("[ML] Training step {} | loss={:.6}", self.step, simulated_loss);
+
+        if simulated_loss < self.best_loss {
+            self.best_loss = simulated_loss;
+        }
+
+        debug!("[ML] Training step {} | loss={:.6} | best={:.6}", self.step, simulated_loss, self.best_loss);
 
         Ok(simulated_loss)
     }
@@ -99,9 +106,15 @@ pub fn cosine_annealing_lr(
     lr_max: f32,
     lr_min: f32,
 ) -> f32 {
+    if warmup_steps == 0 && step == 0 {
+        return lr_max;
+    }
     if step < warmup_steps {
         // Linear warmup
         lr_max * (step as f32 / warmup_steps as f32)
+    } else if total_steps <= warmup_steps {
+        // Edge case: no decay phase
+        lr_max
     } else {
         // Cosine decay
         let progress = (step - warmup_steps) as f32 / (total_steps - warmup_steps) as f32;
