@@ -3,7 +3,7 @@ name = "yield-daemon"
 version = "0.1.0"
 edition = "2021"
 description = "Autonomous yield infrastructure with live Solana execution, Jito MEV bundles, ZK proving, ML inference, and crypto-to-bank treasury pipeline"
-authors = ["AI Cowboys <ops@aicowboys.com>"]
+authors = ["Michael Pendleton"]
 
 [dependencies]
 # Async runtime

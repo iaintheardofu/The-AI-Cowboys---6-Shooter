@@ -18,10 +18,6 @@ The daemon is **self-contained**:
   any LLM or model server.
 - **No runtime dependencies.** `ldd ./yield-daemon` → `statically linked`.
 
-> Note: the *Stallion* coding assistant in this org is the component that runs
-> entirely on a **local Ollama** model (no cloud keys) — that requirement is
-> Stallion's, not this daemon's. They are separate systems.
-
 ---
 
 ## Quick start (one command each)
@@ -113,7 +109,7 @@ yield_daemon_treasury_offramp_cycles
 ```
 
 The daemon also writes `{zk,mev,ml,treasury}_metrics.json` to `state_dir` every
-`metrics_interval_secs` — that JSON bridge is what the Python orchestrator polls
+`metrics_interval_secs` — that JSON bridge is what the off-ramp service polls
 (the Prometheus endpoint is for external scrapers).
 
 ---
@@ -137,8 +133,7 @@ All settings live in `config.toml`; every value has a safe default. Key sections
 module automatically falls back to dry-run mode. The treasury module also
 validates exchange credentials before attempting real off-ramp transactions.
 
-The Python orchestrator additionally gates live-mode activation behind a Human
-Gate. **Understand the risk model before disabling dry-run.**
+**Understand the risk model before disabling dry-run.**
 
 ---
 
@@ -166,4 +161,4 @@ Exit 0 = all stages pass. Safe for CI.
 
 ---
 
-*Built by AI Cowboys.*
+---

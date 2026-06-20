@@ -834,7 +834,7 @@ Headers: API-Key, API-Sign
 1. **Sell USDC:** POST market sell order (USDC-USD on Coinbase, USDCUSD on Kraken)
 2. **Wait for fill:** Poll order status until `settled` (Coinbase) or `closed` (Kraken)
 3. **Withdraw fiat:** POST withdrawal to pre-configured bank account (payment method ID)
-4. **Record:** Update treasury metrics, sign event via Crypto Traces
+4. **Record:** Update treasury metrics, append to audit log
 
 ### 10.5 EVM Support (Solidity Contracts)
 
@@ -878,7 +878,7 @@ if consecutive_losses >= 10:
 The circuit breaker is implemented in the Python orchestrator layer (not Rust) because:
 1. It requires cross-domain aggregation (ZK + MEV + ML losses combined)
 2. It must survive Rust daemon crashes
-3. It integrates with the workforce governance stack (Human Gate, Crypto Traces)
+3. It integrates with the governance layer (manual gate, audit log)
 
 ### 11.2 Slashing Protection
 
@@ -889,40 +889,31 @@ ZK prover networks penalize failed proofs (slashing). Our protection:
 
 ### 11.3 Audit Trail
 
-Every action is logged to `runtime/yield_daemon/audit.jsonl` and signed via the workforce Crypto Traces engine (HMAC-SHA256 chain with tamper detection).
+Every action is logged to `runtime/yield_daemon/audit.jsonl` with HMAC-SHA256 chain signatures for tamper detection.
 
 ---
 
-## 12. Orchestrator Integration
+## 12. Metrics and Integration
 
-### 12.1 Cycle Slots 134-136
+### 12.1 Per-Domain Metrics
 
-The Yield Daemon occupies three orchestrator cycle slots:
+Each domain exports metrics at configurable intervals (default 30s):
 
-| Cycle | Domain | Interval | Key Metrics |
-|-------|--------|----------|-------------|
-| 134 | ZK Prover | 30s | proofs_generated, proofs_accepted, revenue_sat |
-| 135 | MEV Arbitrage | 30s | opportunities, bundles_submitted, revenue_sat |
-| 136 | ML Subnet | 30s | inferences, training_rounds, revenue_sat |
+| Domain | Key Metrics |
+|--------|-------------|
+| ZK Prover | proofs_generated, proofs_accepted, revenue_sat |
+| MEV Arbitrage | opportunities, bundles_submitted, revenue_sat |
+| ML Subnet | inferences, training_rounds, revenue_sat |
 
-### 12.2 Engine Wiring
+Metrics are exported both as Prometheus counters/gauges (`:9191/metrics`) and as JSON files in `state_dir` for the off-ramp service.
 
-```
-YieldDaemon ←→ Revenue Engine (P&L tracking)
-YieldDaemon ←→ Revenue Autopilot (strategy optimization)
-YieldDaemon ←→ Trading Agent (yield reinvestment)
-YieldDaemon ←→ Crypto Traces (audit trail)
-YieldDaemon ←→ Zero Trust Security (credential management)
-YieldDaemon ←→ Economic Metrics (cost tracking)
-YieldDaemon ←→ Constitutional Governance (risk limits)
-YieldDaemon ←→ Human Gate (live mode approval)
-```
+### 12.2 Off-Ramp Integration
 
-### 12.3 Feedback Loops
-
-1. **YieldDaemon → RevenueEngine → EvoRL → YieldDaemon:** Profitable strategies evolve via genetic optimization
-2. **YieldDaemon → EconomicMetrics → DecisionEngine → YieldDaemon:** Cost-inefficient domains get reduced allocation
-3. **YieldDaemon → ImmuneMemory → YieldDaemon:** Failed strategies are antibody-blocked from retry
+The Python off-ramp service (`orchestrator/offramp.py`) polls the JSON metrics bridge and handles:
+- Wallet balance monitoring
+- SOL → USDC consolidation via Jupiter
+- USDC → fiat conversion via exchange API
+- Fiat → bank withdrawal
 
 ---
 
@@ -950,8 +941,8 @@ All benchmarks use Criterion.rs, which:
 
 ### 13.3 Continuous Performance Monitoring
 
-The Python orchestrator tracks per-cycle metrics:
-- `elapsed_ms` per orchestrator cycle
+The off-ramp service tracks per-cycle metrics:
+- `elapsed_ms` per off-ramp cycle
 - `avg_proof_time_ms` for ZK proofs
 - `avg_latency_us` for MEV bundles
 - `gpu_utilization` for ML inference
@@ -1024,4 +1015,4 @@ Montgomery -p⁻¹ mod 2^64 = 0xc2e1f593efffffff
 
 ---
 
-*Document version: 0.2.0 | Last updated: 2026-06-18 | AI Cowboys*
+*Document version: 0.2.0 | Last updated: 2026-06-18*

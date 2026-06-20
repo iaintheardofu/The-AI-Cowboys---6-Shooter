@@ -120,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Metrics bridge ───────────────────────────────────────────────────
     // Export atomic counters to per-domain JSON files that the Python
-    // orchestrator (runtime/yield_daemon.py::_collect_daemon_metrics) polls.
+    // off-ramp service polls.
     // Without this the Python side has no telemetry channel and reads zeros.
     let metrics_state = state.clone();
     tokio::spawn(async move {
@@ -167,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
     // ── Prometheus metrics endpoint ──────────────────────────────────────
     // Serve DaemonMetrics in Prometheus text format on --metrics-port so
     // external scrapers (Prometheus/Grafana) can read live counters. The
-    // Python orchestrator uses the JSON file bridge above, not this endpoint.
+    // The off-ramp service uses the JSON file bridge above, not this endpoint.
     let prom_state = state.clone();
     let prom_port = cli.metrics_port;
     tokio::spawn(async move {
@@ -256,7 +256,7 @@ fn render_prometheus(m: &DaemonMetrics) -> String {
 }
 
 /// Atomically write a metrics JSON file (write-tmp + rename) for the Python
-/// orchestrator's poller. Best-effort: a failed write is skipped, not fatal.
+/// off-ramp service's poller. Best-effort: a failed write is skipped, not fatal.
 fn write_metrics_file(path: &std::path::Path, value: &serde_json::Value) {
     let body = match serde_json::to_string_pretty(value) {
         Ok(s) => s,

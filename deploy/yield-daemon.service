@@ -1,6 +1,6 @@
 [Unit]
 Description=Yield Daemon — Autonomous Yield Generation Infrastructure
-Documentation=https://github.com/iaintheardofu/workforce
+Documentation=https://github.com/iaintheardofu/The-AI-Cowboys---6-Shooter
 After=network-online.target
 Wants=network-online.target
 

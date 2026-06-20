@@ -1,12 +1,12 @@
-# Yield Daemon — Autonomous Yield Infrastructure with Live Execution
+# 6 Shooter — Autonomous Yield Infrastructure with Live Execution
 
-> A headless, 24/7 algorithmic daemon that converts raw compute power into decentralized financial yield — and pipes the profits straight to your bank account. Entirely autonomous, entirely legal.
+> A headless, 24/7 algorithmic daemon that converts raw compute power into decentralized financial yield — and pipes the profits straight to your bank account. Designed for lawful operation when configured in compliance with applicable laws, regulations, and third-party platform terms.
 
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/Tests-70%20Rust%20%2B%2026%20Python-brightgreen.svg)]()
 [![Binary](https://img.shields.io/badge/Binary-3.4MB%20arm64-blue.svg)]()
-[![License](https://img.shields.io/badge/License-Proprietary-red.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
 
@@ -49,11 +49,11 @@ The system operates at the **absolute theoretical performance limit of the hardw
 └──────────────────────────┬───────────────────────────────────────┘
                            │ Metrics / Lifecycle
 ┌──────────────────────────▼───────────────────────────────────────┐
-│               Python Orchestrator Engine                          │
+│                Python Off-Ramp Service                             │
 │  ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐          │
 │  │ Daemon Mgmt  │ │ Risk Engine  │ │ Revenue Reporter │          │
-│  │ Start/Stop   │ │ Circuit Brkr │ │ Crypto Traces    │          │
-│  │ Build/Bench  │ │ Loss Limits  │ │ Economic Metrics │          │
+│  │ Start/Stop   │ │ Circuit Brkr │ │ Audit Logger     │          │
+│  │ Build/Bench  │ │ Loss Limits  │ │ Metrics Export   │          │
 │  └──────────────┘ └──────────────┘ └──────────────────┘          │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -193,7 +193,7 @@ cp .env.example .env
 cargo test
 
 # Python tests (26)
-python3 -m pytest tests/test_yield_daemon.py -v
+python3 -m pytest tests/ -v
 ```
 
 ### Run Benchmarks
@@ -203,13 +203,8 @@ cargo bench
 
 ### Python Integration
 ```python
-from integrations.yield_daemon.connector import YieldDaemonConnector
-
-daemon = YieldDaemonConnector()
-daemon.build()                    # Compile Rust binary
-daemon.start(dry_run=True)        # Start in safe mode
-status = daemon.status()          # Get metrics
-daemon.stop()                     # Graceful shutdown
+# See orchestrator/offramp.py for the Python off-ramp service
+# which monitors daemon metrics and handles crypto-to-bank transfers.
 ```
 
 ---
@@ -269,8 +264,8 @@ Non-negotiable safety mechanisms:
 | **Cycle Loss Limit** | >1% loss in single cycle | Pause domain |
 | **Stake Protection** | >10% stake in ZK proofs | Reduce proof concurrency |
 | **Keypair Fallback** | No keypair.json found | MEV auto-reverts to dry-run |
-| **Crypto Traces** | Every action | Tamper-evident audit trail |
-| **Human Gate** | Live mode activation | Requires explicit approval |
+| **Audit Log** | Every action | Tamper-evident audit trail |
+| **Manual Gate** | Live mode activation | Requires explicit approval |
 
 ---
 
@@ -291,7 +286,7 @@ yield_daemon_treasury_stablecoin_balance   yield_daemon_treasury_fiat_withdrawn_
 yield_daemon_treasury_offramp_cycles
 ```
 
-JSON bridge files (`{zk,mev,ml,treasury}_metrics.json`) written to `state_dir` every 30s for the Python orchestrator.
+JSON bridge files (`{zk,mev,ml,treasury}_metrics.json`) written to `state_dir` every 30s for the off-ramp service.
 
 ---
 
@@ -327,73 +322,23 @@ JSON bridge files (`{zk,mev,ml,treasury}_metrics.json`) written to `state_dir` e
 ## File Structure
 
 ```
-platforms/yield-daemon/
 ├── Cargo.toml                   # Rust project manifest
-├── config.toml                  # Default configuration (live mode)
+├── config.toml                  # Default configuration
 ├── .env.example                 # Environment variable template
 ├── src/
 │   ├── main.rs                  # Daemon entry point + Prometheus server
 │   ├── lib.rs                   # Library root + shared types
 │   ├── config.rs                # Configuration deserialization
-│   ├── zk_prover/
-│   │   ├── mod.rs               # ZK module event loop
-│   │   ├── montgomery.rs        # Montgomery multiplication (CIOS)
-│   │   ├── ntt.rs               # Number-Theoretic Transform
-│   │   ├── msm.rs               # Multi-Scalar Multiplication (Pippenger)
-│   │   ├── fields.rs            # Finite field utilities
-│   │   └── prover.rs            # Prover auction + proof lifecycle
-│   ├── mev/
-│   │   ├── mod.rs               # MEV module + LiveExecutor initialization
-│   │   ├── aste.rs              # ASTE hot loop (Ingest→Simulate→Solve→Execute)
-│   │   ├── executor.rs          # Live swap builders + Jito bundle execution
-│   │   ├── state_shadow.rs      # Cache-aligned SoA local state replica
-│   │   ├── graph.rs             # Bellman-Ford negative cycle detection
-│   │   ├── simd_solver.rs       # Vectorized multi-path evaluator
-│   │   ├── amm.rs               # AMM pool models + swap math
-│   │   ├── router.rs            # Arbitrage route optimizer
-│   │   ├── bundle.rs            # Jito bundle constructor + LiveExecutor bridge
-│   │   ├── solver.rs            # Intent batch auction solver (CoW)
-│   │   └── mempool.rs           # Mempool monitor
-│   ├── ml_subnet/
-│   │   ├── mod.rs               # ML module event loop
-│   │   ├── miner.rs             # Bittensor subnet miner
-│   │   ├── inference.rs         # Tiled GEMM + attention
-│   │   └── training.rs          # Background training loop
-│   ├── memory/
-│   │   ├── arena.rs             # Bump arena allocator (lock-free)
-│   │   └── cache.rs             # SoA structures + AMM pools
-│   ├── net/
-│   │   ├── rpc.rs               # Latency-tracked RPC client
-│   │   ├── p2p.rs               # WebSocket mempool subscriber (live)
-│   │   └── solana.rs            # Ed25519 keypair, tx signing, Jito client
-│   └── treasury/
-│       ├── mod.rs               # Treasury pipeline orchestrator
-│       ├── offramp.rs           # Coinbase/Kraken exchange API clients
-│       ├── vault.rs             # On-chain vault (Solana + EVM)
-│       └── keeper.rs            # Autonomous consolidation + threshold logic
-├── contracts/
-│   ├── ProfitVault.sol          # Solidity vault (EVM chains)
-│   └── FlashArbitrage.sol       # Zero-capital flash swap arbitrage
-├── orchestrator/
-│   └── offramp.py               # Standalone Python off-ramp daemon
-├── deploy/
-│   ├── Dockerfile               # Static binary Docker image
-│   ├── Dockerfile.offramp       # Python off-ramp image
-│   ├── prometheus.yml           # Prometheus scrape config
-│   └── README.md                # Deployment guide
-├── docker-compose.yml           # 3-service stack (daemon + offramp + prometheus)
-└── benches/
-    └── ntt_bench.rs             # Criterion benchmarks
-
-runtime/
-└── yield_daemon.py              # Python orchestrator engine
-
-integrations/yield_daemon/
-├── __init__.py
-└── connector.py                 # Framework integrator connector
-
-tests/
-└── test_yield_daemon.py         # Python test suite (26 tests)
+│   ├── zk_prover/               # Zero-knowledge proof generation
+│   ├── mev/                     # MEV/ASTE arbitrage engine
+│   ├── ml_subnet/               # Bittensor ML inference
+│   ├── memory/                  # Arena allocator + SoA structures
+│   ├── net/                     # RPC, WebSocket, Solana signing
+│   └── treasury/                # Off-ramp pipeline
+├── contracts/                   # Solidity smart contracts
+├── orchestrator/                # Python off-ramp service
+├── deploy/                      # Dockerfile, systemd, scripts
+└── benches/                     # Criterion benchmarks
 ```
 
 ---
@@ -417,15 +362,15 @@ tests/
 
 ## Legal Notes
 
-This system is designed to operate entirely within legal boundaries:
+This software is provided "as is" without warranty. Users are responsible for ensuring compliance with all applicable laws, regulations, and third-party platform terms in their jurisdiction.
 
-- **ZK Proving**: Providing computational services to decentralized networks is akin to cloud computing
-- **MEV Arbitrage**: Market-making and arbitrage are legal activities in decentralized finance
-- **ML Mining**: Providing AI inference services is standard compute-for-hire
-- **Off-Ramp**: Exchange API usage follows standard brokerage account terms
+- **ZK Proving**: Computational services to decentralized networks
+- **MEV Arbitrage**: Market-making and arbitrage on decentralized exchanges
+- **ML Mining**: AI inference services on decentralized compute networks
+- **Off-Ramp**: Exchange API usage per standard brokerage account terms
 
-For US-based operators, consider filing a DBA certificate. Texas operators should be aware of SB 1929 requirements for large flexible loads >75MW on ERCOT.
+This is not financial or legal advice. Consult qualified professionals before operating in production.
 
 ---
 
-*Built by AI Cowboys. Converting electricity into yield since 2026.*
+---

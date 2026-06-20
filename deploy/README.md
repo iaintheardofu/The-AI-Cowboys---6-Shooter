@@ -57,9 +57,9 @@ docker run -d --name yield-daemon \
   perf: `RUSTFLAGS="-C target-cpu=native" cargo build --release`.
 - **Metrics:** the daemon serves Prometheus metrics on `:9191/metrics` (18 series)
   and writes `{zk,mev,ml,treasury}_metrics.json` under `state_dir` (default
-  `runtime/yield_daemon`) every `metrics_interval_secs`; the Python orchestrator
+  `runtime/yield_daemon`) every `metrics_interval_secs`; the off-ramp service
   polls the JSON files while external scrapers use the Prometheus endpoint.
 - **Going live:** flip `dry_run = false` in both `[general]` and `[treasury]`,
   drop your `keypair.json`, and configure RPC endpoints + exchange API credentials
   in `config.toml`. If no keypair is found, the MEV module auto-reverts to dry-run.
-  The orchestrator additionally gates live mode behind a Human Gate.
+  **Understand the risk model before disabling dry-run.**
