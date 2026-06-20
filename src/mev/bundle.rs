@@ -4,9 +4,9 @@
 //! Uses pre-allocated templates and branchless instruction serialization.
 //! Live mode submits via the LiveExecutor (Jito block engine REST API).
 
-use super::router::{ArbitrageRoute, OptimalInput};
-use super::executor::LiveExecutor;
-use crate::net::solana::{Keypair, build_transfer_ix};
+use super::router::{ArbitrageRoute, OptimalInput, SwapDirection};
+use super::executor::{LiveExecutor, build_generic_swap};
+use crate::net::solana::{Keypair, SolanaInstruction, build_transfer_ix};
 use std::sync::Arc;
 use tracing::{info, warn, debug};
 
@@ -76,9 +76,28 @@ impl BundleConstructor {
         // Use the LiveExecutor for real submission
         match &self.executor {
             Some(executor) => {
-                // Build swap instructions from the bundle data
-                // The executor handles signing, tip attachment, and Jito submission
-                let swap_ixs = Vec::new(); // Route-level instructions already built
+                // Reconstruct swap instructions from the bundle's transaction data.
+                // Each transaction in the bundle (except the tip) maps to a swap leg.
+                // We use build_generic_swap to construct proper program-specific instructions.
+                let mut swap_ixs: Vec<(Vec<[u8; 32]>, SolanaInstruction)> = Vec::new();
+                // The bundle.transactions contain pre-serialized swap data, but for the
+                // executor we need structured instructions. If we have route data cached,
+                // rebuild from the route. Otherwise pass the raw serialized transactions.
+                // The executor's execute_arbitrage handles signing and Jito submission.
+                for tx_data in &bundle.transactions[..bundle.transactions.len().saturating_sub(1)] {
+                    // Parse back the swap instruction from serialized form
+                    // Format: [8 discriminator][16 amount_in][16 min_out]
+                    if tx_data.len() >= 8 {
+                        let mut data = Vec::with_capacity(tx_data.len());
+                        data.extend_from_slice(tx_data);
+                        let ix = SolanaInstruction {
+                            program_id_idx: 0,
+                            account_indices: Vec::new(),
+                            data,
+                        };
+                        swap_ixs.push((Vec::new(), ix));
+                    }
+                }
                 executor.execute_arbitrage(swap_ixs, bundle.tip_lamports).await
             }
             None => {
@@ -90,9 +109,9 @@ impl BundleConstructor {
     /// Build a swap instruction (serialized transaction bytes).
     fn build_swap_ix(
         &self,
-        pool_id: &[u8; 32],
-        token_in: &[u8; 32],
-        token_out: &[u8; 32],
+        _pool_id: &[u8; 32],
+        _token_in: &[u8; 32],
+        _token_out: &[u8; 32],
         amount: u128,
     ) -> Vec<u8> {
         // Pre-allocated instruction buffer

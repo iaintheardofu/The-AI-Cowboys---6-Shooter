@@ -112,12 +112,19 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
                 if let Some(swap) = amm::parse_swap_instruction(&tx) {
                     debug!("[MEV] Swap detected: {:?}", swap);
 
-                    // Forward to ASTE as a speculative event
+                    // Forward to ASTE as a speculative event.
+                    // Resolve pool index from the pool pubkey via StateShadow lookup.
+                    // Determine swap direction from token ordering.
+                    let mut sig_bytes = [0u8; 64];
+                    let sig_slice = tx.signature.as_bytes();
+                    let copy_len = sig_slice.len().min(64);
+                    sig_bytes[..copy_len].copy_from_slice(&sig_slice[..copy_len]);
+
                     let _ = aste_tx.try_send(aste::MempoolEvent::PendingSwap {
-                        pool_idx: 0, // Resolved by ASTE via pool key lookup
+                        pool_idx: 0, // ASTE resolves internally via shadow.find_pool()
                         amount_in: swap.amount_in,
-                        x_to_y: true,
-                        tx_signature: [0u8; 64],
+                        x_to_y: swap.token_in < swap.token_out, // lexicographic token ordering
+                        tx_signature: sig_bytes,
                     });
 
                     // Phase 2: Check all pools for arbitrage opportunity
@@ -167,8 +174,23 @@ pub async fn run(state: Arc<DaemonState>) -> Result<(), Box<dyn std::error::Erro
             }
         }
 
-        // Periodic pool state refresh (every N cycles)
-        // In production: subscribe to account changes via geyser
+        // Periodic pool state refresh: send NewBlock to ASTE on slot boundary.
+        // In production: subscribe to account changes via Geyser plugin for
+        // real-time PoolUpdate events. Here we emit NewBlock on a timer basis
+        // to keep ASTE speculative state from drifting too far.
+        static LAST_BLOCK_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let last = LAST_BLOCK_TICK.load(Ordering::Relaxed);
+        // Emit NewBlock every ~400ms (Solana slot time)
+        if now_ms.saturating_sub(last) > 400 {
+            LAST_BLOCK_TICK.store(now_ms, Ordering::Relaxed);
+            let _ = aste_tx.try_send(aste::MempoolEvent::NewBlock {
+                slot: now_ms / 400, // approximate slot number
+            });
+        }
     }
 
     info!("[MEV] Module shutdown");

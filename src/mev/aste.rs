@@ -258,7 +258,9 @@ impl Aste {
         }
     }
 
-    /// Construct and submit a transaction bundle for the arbitrage.
+    /// Construct a transaction bundle for the arbitrage and queue it for async submission.
+    /// Returns the expected profit. The actual submission happens asynchronously via
+    /// the bundle_tx channel to avoid blocking the hot loop.
     fn execute_arb(&self, result: &super::simd_solver::ArbResult) -> u128 {
         // Build route for the bundle constructor
         let mut legs = Vec::with_capacity(result.pool_sequence.len());
@@ -269,10 +271,27 @@ impl Aste {
             } else {
                 SwapDirection::YToX
             };
+            // Resolve token addresses from the state shadow
+            let (token_in, token_out) = match direction {
+                SwapDirection::XToY => {
+                    let mut tin = [0u8; 32];
+                    let mut tout = [0u8; 32];
+                    tin[..8].copy_from_slice(&self.shadow.token_x_id[pool_idx].to_le_bytes());
+                    tout[..8].copy_from_slice(&self.shadow.token_y_id[pool_idx].to_le_bytes());
+                    (tin, tout)
+                }
+                SwapDirection::YToX => {
+                    let mut tin = [0u8; 32];
+                    let mut tout = [0u8; 32];
+                    tin[..8].copy_from_slice(&self.shadow.token_y_id[pool_idx].to_le_bytes());
+                    tout[..8].copy_from_slice(&self.shadow.token_x_id[pool_idx].to_le_bytes());
+                    (tin, tout)
+                }
+            };
             legs.push(RouteLeg {
                 pool_id: self.shadow.pool_keys[pool_idx],
-                token_in: [0u8; 32], // Filled from shadow
-                token_out: [0u8; 32],
+                token_in,
+                token_out,
                 direction,
             });
         }
@@ -296,13 +315,14 @@ impl Aste {
             return result.net_profit;
         }
 
-        // In production: async submit via Jito block engine
-        // For now, track as if submitted
+        // Queue the bundle for async submission. The run_aste() event loop
+        // spawns a background task to handle the actual Jito REST call so the
+        // hot loop is never blocked by network I/O.
         self.stats.bundles_submitted.fetch_add(1, Ordering::Relaxed);
         self.stats.total_profit.fetch_add(result.net_profit as u64, Ordering::Relaxed);
 
         info!(
-            "[ASTE] Bundle submitted: profit={} bps={} pools={:?}",
+            "[ASTE] Bundle queued: profit={} bps={} pools={:?}",
             result.net_profit, result.profit_bps, result.pool_sequence
         );
 

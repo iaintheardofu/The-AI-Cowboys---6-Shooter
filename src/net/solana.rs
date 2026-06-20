@@ -310,6 +310,11 @@ impl LiveRpc {
         }
     }
 
+    /// Get the RPC endpoint URL.
+    pub fn url(&self) -> &str {
+        &self.endpoint
+    }
+
     /// Get latest blockhash for transaction signing.
     pub async fn get_latest_blockhash(&self) -> Result<[u8; 32], Box<dyn std::error::Error + Send + Sync>> {
         let body = serde_json::json!({

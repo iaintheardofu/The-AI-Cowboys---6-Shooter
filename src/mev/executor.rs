@@ -59,13 +59,14 @@ pub fn build_raydium_swap(
         })
         .unwrap_or([0u8; 32]);
 
-    // SPL Token program
-    let token_program: [u8; 32] = {
-        let mut arr = [0u8; 32];
-        // TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
-        arr[31] = 6; // placeholder — real decode needed
-        arr
-    };
+    // SPL Token program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+    let token_program: [u8; 32] = bs58_decode("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+        .ok()
+        .and_then(|v| {
+            let mut arr = [0u8; 32];
+            if v.len() == 32 { arr.copy_from_slice(&v); Some(arr) } else { None }
+        })
+        .unwrap_or([0u8; 32]);
 
     let accounts = vec![
         token_program,
@@ -103,8 +104,25 @@ pub fn build_raydium_swap(
     (accounts, ix)
 }
 
-/// Build a minimal swap instruction for any AMM (generic).
-/// Uses the pool's program ID and a standard swap layout.
+/// Known AMM program IDs for discriminator selection.
+const RAYDIUM_PROGRAM_PREFIX: [u8; 4] = [0x06, 0x0b, 0x7e, 0x94]; // first 4 bytes of 675kPX9...
+const ORCA_PROGRAM_PREFIX: [u8; 4] = [0x03, 0x78, 0xa4, 0x2e];    // first 4 bytes of whirL...
+const METEORA_PROGRAM_PREFIX: [u8; 4] = [0x02, 0x4e, 0xf3, 0x7d]; // first 4 bytes of LBUZKh...
+
+/// Select the correct discriminator for a given AMM program ID.
+fn select_discriminator(program_id: &[u8; 32]) -> &'static [u8; 8] {
+    if program_id[..4] == ORCA_PROGRAM_PREFIX {
+        &ORCA_SWAP_DISCRIMINATOR
+    } else if program_id[..4] == METEORA_PROGRAM_PREFIX {
+        &METEORA_SWAP_DISCRIMINATOR
+    } else {
+        // Default to Raydium (most common)
+        &RAYDIUM_SWAP_DISCRIMINATOR
+    }
+}
+
+/// Build a swap instruction for any supported AMM.
+/// Selects the correct discriminator based on the program ID.
 pub fn build_generic_swap(
     program_id: &[u8; 32],
     pool_accounts: &[[u8; 32]],
@@ -121,9 +139,10 @@ pub fn build_generic_swap(
     accounts.push(*user_owner);
     accounts.push(*program_id);
 
+    let discriminator = select_discriminator(program_id);
+
     let mut data = Vec::with_capacity(24);
-    // Generic swap discriminator
-    data.extend_from_slice(&RAYDIUM_SWAP_DISCRIMINATOR);
+    data.extend_from_slice(discriminator);
     data.extend_from_slice(&amount_in.to_le_bytes());
     data.extend_from_slice(&minimum_out.to_le_bytes());
 
@@ -315,10 +334,7 @@ impl PoolDiscovery {
             "params": [pool_address, {"encoding": "base64"}]
         });
 
-        let resp: serde_json::Value = client.post(&format!("{}",
-            // Use the rpc endpoint
-            "https://api.mainnet-beta.solana.com"
-        ))
+        let resp: serde_json::Value = client.post(self.rpc.url())
             .json(&body)
             .send().await?
             .json().await?;

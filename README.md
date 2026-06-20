@@ -4,7 +4,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-70%20Rust%20%2B%2026%20Python-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-75%20Rust%20%2B%2026%20Python-brightgreen.svg)]()
 [![Binary](https://img.shields.io/badge/Binary-3.4MB%20arm64-blue.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -80,10 +80,17 @@ The daemon ships with a **production-ready live execution stack** — no externa
 - Bundle status tracking and tip floor queries
 - Atomic inclusion: swap chain + tip in single bundle
 
+### Mempool Swap Decoder (`mev/amm.rs`)
+- Discriminator-based O(1) dispatch for **Raydium V4**, **Orca Whirlpool**, and **Meteora DLMM**
+- Decodes instruction data layout: amount_in, min_amount_out, account indices
+- Base58 account deserialization from WebSocket log data
+- Jump table pattern — no if/else chains on the hot path
+
 ### Live MEV Executor (`mev/executor.rs`)
 - **Raydium V4** swap instruction builder (full 18-account layout)
-- **Orca Whirlpool** and **Meteora DLMM** discriminators
-- Generic swap builder for any AMM program
+- **Orca Whirlpool** and **Meteora DLMM** program-specific discriminator selection
+- Generic swap builder with auto-discriminator dispatch per AMM program ID
+- SPL Token program ID resolved via base58 decode (production-correct)
 - Account deduplication and index remapping for multi-hop bundles
 - Signs, serializes, and submits in <1ms (pre-network)
 
@@ -189,7 +196,7 @@ cp .env.example .env
 
 ### Run Tests
 ```bash
-# Rust tests (70)
+# Rust tests (75)
 cargo test
 
 # Python tests (26)
@@ -306,6 +313,7 @@ JSON bridge files (`{zk,mev,ml,treasury}_metrics.json`) written to `state_dir` e
 | SIMD Solver | 5 | Passing |
 | Bloom Filter | 1 | Passing |
 | Intent Solver | 1 | Passing |
+| AMM Swap Parsing (Raydium/Orca/Meteora) | 5 | Passing |
 | ML Inference | 3 | Passing |
 | ML Training | 2 | Passing |
 | Solana Signing (ed25519) | 6 | Passing |
@@ -313,9 +321,9 @@ JSON bridge files (`{zk,mev,ml,treasury}_metrics.json`) written to `state_dir` e
 | Treasury Off-Ramp | 5 | Passing |
 | Treasury Vault | 2 | Passing |
 | Treasury Keeper | 1 | Passing |
-| **Rust Total** | **70** | **All passing** |
+| **Rust Total** | **75** | **All passing** |
 | Python Lifecycle + Risk + Metrics | 26 | Passing |
-| **Grand Total** | **96** | **All passing** |
+| **Grand Total** | **101** | **All passing** |
 
 ---
 

@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Maximum number of pools tracked in the shadow state.
 /// Power-of-two for branchless modular index (mask = MAX - 1).
 pub const MAX_POOLS: usize = 4096;
+/// Branchless modular index mask (pool_idx & INDEX_MASK wraps to [0, MAX_POOLS)).
+#[allow(dead_code)]
 const INDEX_MASK: usize = MAX_POOLS - 1;
 
 /// Cache-aligned Structure-of-Arrays pool state.
